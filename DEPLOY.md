@@ -41,8 +41,10 @@ Le tabelle non vanno create a mano: vengono generate al primo avvio.
 
 1. Su [vercel.com](https://vercel.com) scegli **Add New → Project** e importa
    questo repository.
-2. Non serve cambiare build command o output directory: `vercel.json` e
-   `api/index.py` sono gia' nel repository.
+2. Lascia **Application Preset** su *Python*: l'applicazione è esposta come
+   WSGI (`app` in `app.py`) ed è la forma che quel runtime si aspetta. Non
+   servono build command, output directory né rewrite: con questo preset Vercel
+   instrada da sé ogni richiesta all'applicazione.
 3. Prima di premere **Deploy**, apri **Environment Variables** e inserisci i
    valori dell'elenco qui sotto.
 4. Premi **Deploy**.
@@ -193,9 +195,10 @@ finito.
 
 ## 5. Limite di tempo per richiesta
 
-Una funzione Vercel ha un tempo massimo di esecuzione (`maxDuration` in
-`vercel.json`, impostato a 60 secondi; fino a 300 sul piano Pro). Interrogare
-GLS per centinaia di spedizioni può superarlo.
+Una funzione Vercel ha un tempo massimo di esecuzione (60 secondi sul piano
+Hobby, fino a 300 sul Pro). Si imposta in **Project Settings → Functions →
+Function Max Duration**. Interrogare GLS per centinaia di spedizioni può
+superarlo.
 
 Per questo esiste `SYNC_MAX_TRACKING`: limita quante spedizioni vengono
 aggiornate a ogni esecuzione. Le altre non vengono perse, passano al giro

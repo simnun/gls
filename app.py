@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from core import auth
 from core.config import get_config
+from core.wsgi import make_wsgi_app
 from core.db import Database
 from core.sync import SyncEngine
 from core.xlsx_export import build_xlsx
@@ -591,6 +592,12 @@ class AppHandler(BaseHTTPRequestHandler):
         if CONFIG.shopify_shop and customer_legacy:
             customer_url = f"https://admin.shopify.com/store/{CONFIG.shopify_shop}/customers/{customer_legacy}"
         return {"gls": gls_url, "shopify": shopify_url, "shopify_profile": customer_url}
+
+
+# Applicazione WSGI: e' la forma attesa dal runtime Python di Vercel.
+# In locale resta inutilizzata, il server parte da main().
+app = make_wsgi_app(AppHandler)
+application = app
 
 
 def main() -> None:
