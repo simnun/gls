@@ -15,7 +15,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from datetime import datetime, timezone
+
 from core import auth
+from core.sync import _parse_iso
 from core.config import get_config
 from core.wsgi import make_wsgi_app
 from core.db import Database
@@ -647,6 +650,15 @@ class AppHandler(BaseHTTPRequestHandler):
         """
         last = DB.latest_sync() or {}
         running = str(last.get("status") or "").upper() == "RUNNING"
+        # In serverless nessuna sincronizzazione puo' durare piu' del tempo
+        # massimo della richiesta: una riga ancora RUNNING oltre quella soglia
+        # appartiene a un processo gia' terminato d'autorita'. Segnalarla come
+        # attiva farebbe girare all'infinito la barra di avanzamento.
+        if running:
+            iniziata = _parse_iso(last.get("started_at"))
+            limite = max(120, (CONFIG.sync_time_budget_seconds or 60) * 2)
+            if iniziata is None or (datetime.now(timezone.utc) - iniziata).total_seconds() > limite:
+                running = False
         total = int(last.get("tracking_numbers") or 0)
         success = int(last.get("gls_success") or 0)
         errors = int(last.get("gls_errors") or 0)
