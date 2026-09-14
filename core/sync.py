@@ -286,6 +286,11 @@ class SyncEngine:
                 if state and bool(state.get("closed")):
                     skipped_closed += 1
                     continue
+                # Una spedizione fresca da Shopify non sa quando e' stata
+                # interrogata a GLS: senza questo dato finirebbe sempre in cima
+                # alla coda, e chi aspetta da piu' tempo non arriverebbe mai.
+                if state and state.get("gls_checked_at"):
+                    shipment["gls_checked_at"] = state["gls_checked_at"]
                 targets.append(shipment)
                 target_numbers.add(tracking)
 

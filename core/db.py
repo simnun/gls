@@ -431,7 +431,7 @@ class Database:
     def tracking_state_map(self) -> dict[str, dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT tracking_number,closed,category,workflow_status,last_seen_at FROM shipments"
+                "SELECT tracking_number,closed,category,workflow_status,last_seen_at,gls_checked_at FROM shipments"
             ).fetchall()
             return {str(r["tracking_number"]): dict(r) for r in rows}
 
