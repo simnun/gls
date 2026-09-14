@@ -304,7 +304,11 @@ class SyncEngine:
             budget = getattr(self.config, "sync_time_budget_seconds", 0)
             # Registrate subito: una spedizione rinviata e mai salvata sparirebbe,
             # perche' la ricerca incrementale su Shopify non la ritroverebbe.
-            self.db.register_pending_shipments(rimandate)
+            # Solo quelle ancora sconosciute: riscrivere a ogni giro le centinaia
+            # gia' note costerebbe piu' tempo di quanto ne resti per GLS.
+            self.db.register_pending_shipments(
+                [s for s in rimandate if str(s.get("tracking_number") or "") not in existing]
+            )
             deferred = len(rimandate)
             tracking_numbers = len(targets)
 
@@ -349,7 +353,10 @@ class SyncEngine:
                             spedizione for rimasto, spedizione in future_map.items()
                             if rimasto.cancel()
                         ]
-                        self.db.register_pending_shipments(annullate)
+                        self.db.register_pending_shipments(
+                            [s for s in annullate
+                             if str(s.get("tracking_number") or "") not in existing]
+                        )
                         deferred += len(annullate)
                         break
                     shipment = future_map[future]
