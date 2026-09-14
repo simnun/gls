@@ -6,7 +6,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, time as dt_time, timedelta, timezone
-from zoneinfo import ZoneInfo
 from typing import Any
 
 from .classifier import Classifier
@@ -18,7 +17,7 @@ from .shopify import ShopifyClient
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-ROME = ZoneInfo("Europe/Rome")
+from .timezones import ROME  # noqa: E402
 
 
 def _parse_iso(value: str | None) -> datetime | None:

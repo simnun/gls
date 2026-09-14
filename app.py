@@ -5,6 +5,7 @@ import base64
 import hmac
 import json
 import mimetypes
+import re
 import signal
 import subprocess
 import sys
@@ -22,8 +23,52 @@ from core.sync import SyncEngine
 from core.xlsx_export import build_xlsx
 
 CONFIG = get_config()
-DB = Database(None if CONFIG.uses_postgres else CONFIG.db_path, dsn=CONFIG.database_url or None)
-ENGINE = SyncEngine(CONFIG, DB)
+
+
+class _Pigro:
+    """Costruzione differita alla prima richiesta.
+
+    All'import non si deve toccare ne' la rete ne' il disco: su un hosting
+    serverless un errore li' fa morire la funzione prima che possa rispondere,
+    e si ottiene un 500 generico senza alcuna indicazione della causa.
+    """
+
+    def __init__(self, fabbrica):
+        self._fabbrica = fabbrica
+        self._istanza = None
+        self._lock = threading.Lock()
+
+    def risolvi(self):
+        if self._istanza is None:
+            with self._lock:
+                if self._istanza is None:
+                    self._istanza = self._fabbrica()
+        return self._istanza
+
+    def __getattr__(self, nome):
+        return getattr(self.risolvi(), nome)
+
+
+def _apri_database() -> Database:
+    if CONFIG.storage_misconfigured:
+        raise RuntimeError(
+            "DATABASE_URL non impostata. Su un hosting serverless il disco non "
+            "sopravvive alla singola richiesta: senza un database esterno ogni "
+            "nota, giacenza e svincolo andrebbe perso. Configura Postgres/Supabase."
+        )
+    return Database(
+        None if CONFIG.uses_postgres else CONFIG.db_path,
+        dsn=CONFIG.database_url or None,
+    )
+
+
+DB = _Pigro(_apri_database)
+ENGINE = _Pigro(lambda: SyncEngine(CONFIG, DB.risolvi()))
+
+
+def _senza_credenziali(testo: str) -> str:
+    """Toglie le credenziali dagli URL prima di mostrare un messaggio d'errore."""
+    return re.sub(r"(://)[^/\s:@]+:[^/\s@]+@", r"\1***:***@", str(testo))
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -105,6 +150,14 @@ class AppHandler(BaseHTTPRequestHandler):
         return hmac.compare_digest(header[7:].strip(), CONFIG.cron_secret)
 
     def _require_auth(self) -> bool:
+        if CONFIG.storage_misconfigured:
+            self._json(
+                {"error": "DATABASE_URL non impostata: il deploy online richiede "
+                          "un database esterno.",
+                 "hint": "Controlla /api/status."},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return False
         # Un deploy pubblico senza credenziali esporrebbe dati cliente: non si serve nulla.
         if CONFIG.auth_required_but_missing:
             self._json(
@@ -162,8 +215,22 @@ class AppHandler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8"))
 
     def do_GET(self) -> None:
+        try:
+            return self._do_GET()
+        except Exception as exc:
+            return self._json(
+                {"error": f"{type(exc).__name__}: {_senza_credenziali(exc)}",
+                 "hint": "Controlla /api/status per lo stato della configurazione."},
+                500,
+            )
+
+    def _do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
+        # Diagnostica: deve rispondere anche quando la configurazione e' incompleta,
+        # altrimenti un guasto all'avvio resta invisibile dall'esterno.
+        if path == "/api/status":
+            return self._handle_status()
         # Il cron esterno si autentica con CRON_SECRET, non con le credenziali dashboard.
         if path == "/api/cron/sync":
             return self._handle_cron_sync()
@@ -280,6 +347,16 @@ class AppHandler(BaseHTTPRequestHandler):
         return self._serve_static(path)
 
     def do_POST(self) -> None:
+        try:
+            return self._do_POST()
+        except Exception as exc:
+            return self._json(
+                {"error": f"{type(exc).__name__}: {_senza_credenziali(exc)}",
+                 "hint": "Controlla /api/status per lo stato della configurazione."},
+                500,
+            )
+
+    def _do_POST(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -468,6 +545,44 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def _handle_status(self) -> None:
+        """Stato dell'installazione, senza rivelare alcun segreto.
+
+        Riporta solo se le varie configurazioni sono presenti e se il database
+        risponde: serve a capire perche' il monitor non parte, senza dover
+        accedere ai log della piattaforma.
+        """
+        from core.timezones import tzdata_available
+
+        stato: dict = {
+            "ok": True,
+            "python": sys.version.split()[0],
+            "tzdata": tzdata_available(),
+            "serverless": CONFIG.serverless,
+            "storage": "postgres" if CONFIG.uses_postgres else "sqlite",
+            "configurato": {
+                "database_url": bool(CONFIG.database_url),
+                "operatori": len(CONFIG.dashboard_users),
+                "shopify": CONFIG.shopify_configured,
+                "gls_tracking": CONFIG.gls_tracking_configured,
+                "gls_svincoli": CONFIG.gls_list_configured,
+                "cron_secret": bool(CONFIG.cron_secret),
+                "mock_mode": CONFIG.mock_mode,
+            },
+        }
+        try:
+            DB.risolvi()
+            stato["database"] = "raggiungibile"
+        except Exception as exc:
+            stato["ok"] = False
+            stato["database"] = "errore"
+            stato["database_errore"] = f"{type(exc).__name__}: {_senza_credenziali(exc)}"[:400]
+
+        if CONFIG.auth_required_but_missing:
+            stato["ok"] = False
+            stato["avviso"] = "Nessun operatore configurato: imposta DASHBOARD_USERS."
+        return self._json(stato, 200 if stato["ok"] else 503)
 
     def _handle_login(self) -> None:
         if not CONFIG.multi_user:

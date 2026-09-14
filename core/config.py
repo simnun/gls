@@ -116,6 +116,15 @@ class Config:
         return bool(self.database_url)
 
     @property
+    def storage_misconfigured(self) -> bool:
+        """Deploy effimero senza database esterno.
+
+        Su serverless il disco non sopravvive alla richiesta: SQLite
+        significherebbe perdere ogni nota e ogni giacenza a ogni chiamata.
+        """
+        return self.serverless and not self.uses_postgres
+
+    @property
     def auth_required_but_missing(self) -> bool:
         """Deploy raggiungibile da internet senza credenziali impostate.
 

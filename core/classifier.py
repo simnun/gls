@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
-ROME = ZoneInfo("Europe/Rome")
+from .timezones import ROME  # noqa: E402
 SEVERITY_RANK = {"NORMAL": 1, "INFO": 2, "WATCH": 3, "WARNING": 4, "CRITICAL": 5}
 
 

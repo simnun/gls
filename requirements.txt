@@ -1,3 +1,7 @@
 # Solo per il deploy online su Postgres/Supabase.
 # In locale su SQLite il progetto resta senza dipendenze esterne.
 psycopg[binary]==3.3.5
+
+# Il database dei fusi orari non e' incluso nelle immagini serverless:
+# senza, ZoneInfo("Europe/Rome") fallisce durante l'import.
+tzdata==2026.1

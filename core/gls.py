@@ -13,9 +13,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from html.parser import HTMLParser
 from xml.etree import ElementTree as ET
-from zoneinfo import ZoneInfo
 
-ROME = ZoneInfo("Europe/Rome")
+from .timezones import ROME  # noqa: E402
 
 
 class GLSError(RuntimeError):
