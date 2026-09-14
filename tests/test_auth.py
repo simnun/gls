@@ -121,5 +121,48 @@ class HeaderTests(unittest.TestCase):
         self.assertEqual(cookies["altro"], "1")
 
 
+class PrefissoDiReteTests(unittest.TestCase):
+    """La sessione e' legata alla rete, non al singolo indirizzo.
+
+    Reti aziendali con piu' uscite, reti mobili e CGNAT mostrano indirizzi
+    diversi a ogni richiesta: con il vincolo sull'indirizzo esatto l'operatore
+    verrebbe disconnesso di continuo.
+    """
+
+    def test_prefisso_ipv4_e_la_rete_24(self):
+        self.assertEqual(auth.network_prefix("160.79.106.130"), "160.79.106.0/24")
+        self.assertEqual(auth.network_prefix("160.79.106.136"), "160.79.106.0/24")
+
+    def test_prefisso_ipv6_e_la_rete_64(self):
+        self.assertEqual(auth.network_prefix("2a03:b0c0:1:e0::ff"), "2a03:b0c0:1:e0::/64")
+
+    def test_valore_non_valido_resta_invariato(self):
+        self.assertEqual(auth.network_prefix("non-un-ip"), "non-un-ip")
+        self.assertEqual(auth.network_prefix(""), "")
+
+    def test_sessione_valida_da_indirizzi_diversi_della_stessa_rete(self):
+        secret = auth.derive_secret("[]", "prova-rete")
+        token = auth.create_session("simone@zuiki.it", secret, "160.79.106.130")
+        for ip in ("160.79.106.130", "160.79.106.136", "160.79.106.254"):
+            self.assertEqual(
+                auth.read_session(token, secret, max_age_seconds=86400, client_ip=ip),
+                "simone@zuiki.it",
+                f"respinta da {ip}, stessa rete",
+            )
+
+    def test_sessione_respinta_da_una_rete_diversa(self):
+        secret = auth.derive_secret("[]", "prova-rete")
+        token = auth.create_session("simone@zuiki.it", secret, "160.79.106.130")
+        for ip in ("160.79.107.1", "203.0.113.9", "10.0.0.1"):
+            self.assertIsNone(
+                auth.read_session(token, secret, max_age_seconds=86400, client_ip=ip),
+                f"accettata da {ip}, rete diversa",
+            )
+
+    def test_il_token_non_contiene_la_rete_in_chiaro(self):
+        secret = auth.derive_secret("[]", "prova-rete")
+        token = auth.create_session("simone@zuiki.it", secret, "160.79.106.130")
+        self.assertNotIn("160.79.106", token)
+
 if __name__ == "__main__":
     unittest.main()

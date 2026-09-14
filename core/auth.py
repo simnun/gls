@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -121,8 +122,30 @@ def derive_secret(users_raw: str, explicit: str = "") -> bytes:
     return hashlib.sha256(b"gls-monitor-session|" + users_raw.encode("utf-8")).digest()
 
 
+def network_prefix(client_ip: str) -> str:
+    """Rete di provenienza, non il singolo indirizzo.
+
+    Molte reti mostrano indirizzi diversi a ogni richiesta: uscite multiple
+    aziendali, reti mobili, CGNAT. Legare la sessione all'indirizzo esatto
+    costringerebbe a rifare l'accesso di continuo. Il prefisso di rete
+    (/24 su IPv4, /64 su IPv6) tollera quella rotazione e continua a
+    respingere un cookie usato da una rete diversa.
+    """
+    client_ip = (client_ip or "").strip()
+    if not client_ip:
+        return ""
+    try:
+        indirizzo = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return client_ip
+    rete = ipaddress.ip_network(
+        f"{indirizzo}/{24 if indirizzo.version == 4 else 64}", strict=False
+    )
+    return str(rete)
+
+
 def _fingerprint(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(network_prefix(value).encode("utf-8")).hexdigest()[:16]
 
 
 def create_session(username: str, secret: bytes, client_ip: str = "") -> str:

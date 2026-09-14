@@ -30,6 +30,10 @@
   `SameSite=Lax` e `Secure` in HTTPS: non e' leggibile da JavaScript.
 - La sessione e' legata alla rete da cui e' stato fatto l'accesso
   (`SESSION_BIND_IP`): un cookie copiato altrove non apre la dashboard.
+  Il confronto usa il prefisso di rete (/24 su IPv4, /64 su IPv6) e non
+  l'indirizzo esatto: reti con piu' uscite, mobili o CGNAT cambiano indirizzo
+  a ogni richiesta, e un vincolo esatto renderebbe la sessione inutilizzabile.
+  Nel token la rete compare solo come hash.
 - Il messaggio di errore dell'accesso non distingue mai tra email sconosciuta e
   password sbagliata.
 - Il monitor non limita da solo i tentativi di accesso ripetuti. Se lo esponi su

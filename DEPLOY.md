@@ -111,9 +111,12 @@ python3 genera_utenti.py "nome@zuiki.it:Nome:LaPassword"
   cambio di stato viene attribuito a chi ha fatto l'accesso.
 - La sessione resta valida **30 giorni sullo stesso browser e dalla stessa
   rete**: dall'ufficio non vengono richieste le credenziali ogni volta.
-- Da una rete diversa (casa, telefono in 4G) la stessa sessione non vale e viene
-  chiesto di nuovo l'accesso. È una protezione: un cookie rubato non apre la
-  dashboard altrove. Se gli operatori devono entrare da più reti, imposta
+- Il vincolo è sulla *rete* (/24 su IPv4, /64 su IPv6), non sul singolo
+  indirizzo: molte connessioni mostrano indirizzi diversi a ogni richiesta e
+  con un vincolo esatto gli operatori verrebbero disconnessi di continuo.
+- Da una rete diversa (casa, telefono in 4G) viene chiesto di nuovo l'accesso.
+  È una protezione: un cookie rubato non apre la dashboard altrove. Se gli
+  operatori devono entrare spesso da reti diverse, imposta
   `SESSION_BIND_IP=false`.
 
 ### Cambiare una password
