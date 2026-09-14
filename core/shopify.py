@@ -71,8 +71,18 @@ class ShopifyClient:
         payload = self._request_json(req)
         return payload.get("data") or {}, payload.get("errors") or []
 
-    def list_recent_orders(self) -> list[dict[str, Any]]:
-        since = (datetime.now(timezone.utc) - timedelta(days=self.config.shopify_lookback_days)).date().isoformat()
+    def list_recent_orders(self, since_iso: str | None = None) -> list[dict[str, Any]]:
+        """Ordini da esaminare.
+
+        `since_iso` restringe la ricerca a cio' che e' cambiato dall'ultima
+        sincronizzazione: scandire ogni volta l'intera finestra costa il grosso
+        del tempo disponibile. Le spedizioni ancora aperte non vanno perse,
+        perche' sono gia' nel database e vengono riprese da li'.
+        """
+        finestra = (
+            datetime.now(timezone.utc) - timedelta(days=self.config.shopify_lookback_days)
+        ).date().isoformat()
+        since = since_iso or finestra
         search_query = f"updated_at:>={since}"
         full_query = r"""
         query MonitorOrders($first: Int!, $after: String, $query: String!) {

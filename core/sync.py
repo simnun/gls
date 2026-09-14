@@ -259,7 +259,7 @@ class SyncEngine:
                 raise RuntimeError("GLS Track & Trace non configurato: completa il file .env")
 
             self._set_progress(phase="SHOPIFY", label="Cerco nuove spedizioni GLS su Shopify…")
-            orders = self.shopify.list_recent_orders()
+            orders = self.shopify.list_recent_orders(self._shopify_since())
             shopify_orders = len(orders)
 
             self._set_progress(phase="FILTERING", label=f"Preparo l'aggiornamento tra {shopify_orders} ordini Shopify…")
@@ -417,6 +417,36 @@ class SyncEngine:
             return {"ok": False, "message": str(exc)}
         finally:
             self.lock.release()
+
+    def _shopify_since(self) -> str | None:
+        """Da quando ricercare su Shopify.
+
+        Dalla seconda sincronizzazione in poi basta cio' che e' cambiato
+        dall'ultima, con un margine di sovrapposizione che assorbe ritardi di
+        indicizzazione e orologi non allineati. None significa finestra intera:
+        e' il caso del primo popolamento.
+        """
+        # E' solo un'ottimizzazione: qualunque intoppo qui deve ricadere sulla
+        # finestra intera, che resta corretta, non far fallire l'intera
+        # sincronizzazione.
+        try:
+            ultima = self.db.last_successful_sync_at()
+            if not ultima:
+                return None
+            momento = _parse_iso(ultima)
+            if momento is None:
+                return None
+            margine = max(0, getattr(self.config, "shopify_overlap_minutes", 60))
+            inizio = momento - timedelta(minutes=margine)
+            # Oltre la finestra configurata si torna alla ricerca completa:
+            # significa che il monitor e' rimasto fermo a lungo.
+            giorni = getattr(self.config, "shopify_lookback_days", 21)
+            limite = datetime.now(timezone.utc) - timedelta(days=giorni)
+            if inizio <= limite:
+                return None
+            return inizio.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            return None
 
     def _save_tracking(self, shipment: dict[str, Any], tracked: dict[str, Any]) -> None:
         current = tracked.get("current_event") or {}

@@ -366,6 +366,16 @@ class Database:
                  resolution_hint[:2000], max(1, int(attempts or 1)), utcnow()),
             )
 
+    def last_successful_sync_at(self) -> str | None:
+        """Inizio dell'ultima sincronizzazione conclusa, anche solo in parte."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT started_at FROM sync_runs
+                   WHERE status IN ('OK','PARTIAL') AND finished_at IS NOT NULL
+                   ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+            return row["started_at"] if row else None
+
     def close_stale_syncs(self, older_than_minutes: int = 15) -> int:
         """Chiude le sincronizzazioni rimaste in RUNNING.
 

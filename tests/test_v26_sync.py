@@ -12,7 +12,7 @@ from core.gls import GLSError
 class FakeShopify:
     def __init__(self, shipments):
         self.shipments = shipments
-    def list_recent_orders(self):
+    def list_recent_orders(self, since_iso=None):
         return [{"id": "order"}]
     def extract_gls_shipments(self, orders):
         return list(self.shipments)
