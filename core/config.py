@@ -81,6 +81,7 @@ class Config:
     sync_interval_minutes: int
     sync_workers: int
     sync_max_tracking: int
+    sync_time_budget_seconds: int
     gls_public_workers: int
     gls_retry_attempts: int
     request_timeout_seconds: int
@@ -202,6 +203,9 @@ def get_config() -> Config:
         sync_workers=max(1, min(8, env_int("SYNC_WORKERS", 4))),
         # 0 = nessun limite. Serve dove la richiesta ha un tempo massimo (Vercel).
         sync_max_tracking=max(0, env_int("SYNC_MAX_TRACKING", 0)),
+        # Secondi oltre i quali la sincronizzazione si chiude da sola. 0 = nessun
+        # limite. Serve dove la richiesta viene interrotta d'autorita'.
+        sync_time_budget_seconds=max(0, env_int("SYNC_TIME_BUDGET_SECONDS", 0)),
         gls_public_workers=max(1, min(4, env_int("GLS_PUBLIC_WORKERS", 2))),
         gls_retry_attempts=max(1, min(5, env_int("GLS_RETRY_ATTEMPTS", 3))),
         request_timeout_seconds=max(5, env_int("REQUEST_TIMEOUT_SECONDS", 20)),

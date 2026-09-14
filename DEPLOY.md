@@ -70,6 +70,7 @@ mai il `.env`: su Vercel i valori vivono solo nelle impostazioni del progetto.
 | `GLS_PASSWORD` | password del web service GLS | sì |
 | `MOCK_MODE` | `false` | no |
 | `SYNC_MAX_TRACKING` | quante spedizioni aggiornare per esecuzione, es. `120` | consigliata |
+| `SYNC_TIME_BUDGET_SECONDS` | secondi dopo i quali la sincronizzazione si chiude da sola, es. `45` | consigliata |
 | `SESSION_SECRET` | stringa casuale che firma i cookie di sessione | consigliata |
 | `SESSION_DAYS` | durata dell'accesso in giorni, `0` = senza scadenza | no |
 | `SESSION_BIND_IP` | `true` lega la sessione alla rete di accesso | no |
@@ -211,6 +212,17 @@ sincronizzazione indica quante sono state rinviate.
 
 Un valore di partenza ragionevole è `120`. Se vedi sincronizzazioni interrotte,
 abbassalo.
+
+A questo si aggiunge `SYNC_TIME_BUDGET_SECONDS`, che è la protezione vera:
+superati quei secondi la sincronizzazione **si chiude da sola in modo
+ordinato**, salva quanto ha fatto e rimanda il resto al giro successivo. Senza,
+la richiesta verrebbe interrotta d'autorità a metà lavoro e la pratica
+resterebbe segnata come "in corso" per sempre. Impostalo una decina di secondi
+sotto il tempo massimo della funzione: con 60 secondi di limite, `45`.
+
+Le sincronizzazioni rimaste appese da interruzioni precedenti vengono comunque
+chiuse in automatico dopo 15 minuti, così la barra di avanzamento non resta a
+girare all'infinito.
 
 ---
 

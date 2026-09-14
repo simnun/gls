@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -365,6 +365,24 @@ class Database:
                 (sync_id, tracking_number, error_code, error_title, error_message[:4000],
                  resolution_hint[:2000], max(1, int(attempts or 1)), utcnow()),
             )
+
+    def close_stale_syncs(self, older_than_minutes: int = 15) -> int:
+        """Chiude le sincronizzazioni rimaste in RUNNING.
+
+        Se il processo viene interrotto a meta' (su serverless capita quando la
+        richiesta supera il tempo massimo) la riga resta RUNNING per sempre e
+        l'interfaccia continua a mostrare un aggiornamento in corso.
+        """
+        soglia = (datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes))
+        soglia_iso = soglia.isoformat(timespec="milliseconds")
+        with self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE sync_runs SET status='INTERROTTA', finished_at=?,
+                   message=COALESCE(message,'Interrotta: tempo massimo della richiesta superato')
+                   WHERE status='RUNNING' AND started_at < ?""",
+                (utcnow(), soglia_iso),
+            )
+            return int(cur.rowcount or 0)
 
     def latest_sync(self) -> dict[str, Any] | None:
         with self.connect() as conn:

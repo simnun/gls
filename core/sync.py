@@ -228,6 +228,8 @@ class SyncEngine:
 
         self._begin_progress()
         sync_started_monotonic = time.monotonic()
+        # Una sincronizzazione interrotta a meta' resterebbe RUNNING per sempre.
+        self.db.close_stale_syncs()
         sync_id = self.db.start_sync()
         shopify_orders = 0
         discovered_tracking = 0
@@ -297,6 +299,7 @@ class SyncEngine:
                     carried_open += 1
 
             targets, deferred = select_sync_batch(targets, getattr(self.config, "sync_max_tracking", 0))
+            budget = getattr(self.config, "sync_time_budget_seconds", 0)
             tracking_numbers = len(targets)
 
             if tracking_numbers == 0:
@@ -332,6 +335,14 @@ class SyncEngine:
 
                 processed = 0
                 for future in as_completed(future_map):
+                    # Oltre il budget si chiude ordinatamente: una sincronizzazione
+                    # interrotta d'autorita' lascerebbe la pratica aperta per sempre
+                    # e nessun conteggio salvato.
+                    if budget and (time.monotonic() - sync_started_monotonic) > budget:
+                        for rimasto, spedizione in future_map.items():
+                            if rimasto.cancel():
+                                deferred += 1
+                        break
                     shipment = future_map[future]
                     self._set_progress(current_tracking=shipment.get("tracking_number"))
                     try:
@@ -370,6 +381,8 @@ class SyncEngine:
                 msg += f" · {carried_open} aperte storiche mantenute"
             if deferred:
                 msg += f" · {deferred} rinviate al prossimo giro"
+            if budget and (time.monotonic() - sync_started_monotonic) > budget:
+                msg += " (tempo massimo raggiunto)"
             self.db.finish_sync(
                 sync_id, status, shopify_orders=shopify_orders, discovered_tracking=discovered_tracking,
                 tracking_numbers=tracking_numbers, skipped_closed=skipped_closed, carried_open=carried_open,
