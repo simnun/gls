@@ -131,5 +131,59 @@ class FusoOrarioTests(unittest.TestCase):
         self.assertIs(c, base)
 
 
+
+class VariabiliVuoteTests(unittest.TestCase):
+    """Una variabile vuota non deve sovrascrivere il valore predefinito.
+
+    Le piattaforme di hosting creano spesso tutte le variabili elencate in
+    `.env.example` lasciandole vuote: senza questa regola gli endpoint GLS
+    diventerebbero stringhe vuote e la sincronizzazione fallirebbe senza una
+    causa evidente.
+    """
+
+    VUOTE = ("AUTO_SYNC", "GLS_TRACK_ENDPOINT", "GLS_LIST_ENDPOINT",
+             "GLS_RELEASE_ENDPOINT", "SHOPIFY_API_VERSION", "APP_HOST",
+             "SYNC_INTERVAL_MINUTES", "SHOPIFY_LOOKBACK_DAYS", "SESSION_DAYS",
+             "SYNC_WORKERS", "REQUEST_TIMEOUT_SECONDS")
+
+    def setUp(self):
+        self.precedenti = {k: os.environ.get(k) for k in self.VUOTE}
+        for chiave in self.VUOTE:
+            os.environ[chiave] = ""
+
+    def tearDown(self):
+        for chiave, valore in self.precedenti.items():
+            if valore is None:
+                os.environ.pop(chiave, None)
+            else:
+                os.environ[chiave] = valore
+
+    def configurazione(self):
+        from core.config import get_config
+
+        return get_config()
+
+    def test_booleano_mantiene_il_default(self):
+        self.assertTrue(self.configurazione().auto_sync)
+
+    def test_endpoint_gls_mantengono_il_default(self):
+        cfg = self.configurazione()
+        self.assertTrue(cfg.gls_track_endpoint.startswith("https://"))
+        self.assertTrue(cfg.gls_list_endpoint.startswith("https://"))
+        self.assertTrue(cfg.gls_release_endpoint.startswith("https://"))
+
+    def test_valori_testuali_e_numerici_mantengono_il_default(self):
+        cfg = self.configurazione()
+        self.assertEqual(cfg.shopify_api_version, "2026-07")
+        self.assertEqual(cfg.app_host, "127.0.0.1")
+        self.assertEqual(cfg.sync_interval_minutes, 10)
+        self.assertEqual(cfg.shopify_lookback_days, 21)
+        self.assertEqual(cfg.session_days, 30)
+        self.assertEqual(cfg.sync_workers, 4)
+
+    def test_spazi_equivalgono_a_vuoto(self):
+        os.environ["SHOPIFY_API_VERSION"] = "   "
+        self.assertEqual(self.configurazione().shopify_api_version, "2026-07")
+
 if __name__ == "__main__":
     unittest.main()

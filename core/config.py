@@ -25,16 +25,31 @@ def load_env(path: Path = ENV_PATH) -> None:
         os.environ.setdefault(key, value)
 
 
-def env_bool(name: str, default: bool = False) -> bool:
+def env_str(name: str, default: str = "") -> str:
+    """Valore di una variabile, trattando la stringa vuota come assente.
+
+    Le piattaforme di hosting creano spesso le variabili elencate in
+    `.env.example` lasciandole vuote. Senza questa regola una variabile vuota
+    sovrascriverebbe il valore predefinito: gli endpoint GLS diventerebbero
+    stringhe vuote e la sincronizzazione fallirebbe senza una causa evidente.
+    """
     value = os.getenv(name)
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "on", "si", "sì"}
+    value = value.strip()
+    return value if value else default
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = env_str(name)
+    if not value:
+        return default
+    return value.lower() in {"1", "true", "yes", "on", "si", "sì"}
 
 
 def env_int(name: str, default: int) -> int:
     try:
-        return int(os.getenv(name, str(default)).strip())
+        return int(env_str(name, str(default)))
     except Exception:
         return default
 
@@ -144,7 +159,7 @@ def _database_url() -> str:
                 value = "postgresql://" + value[len("postgres://"):]
             # Uno schema dedicato permette di riusare un progetto Supabase
             # gia' occupato da un'altra applicazione senza mischiare le tabelle.
-            schema = os.getenv("DATABASE_SCHEMA", "").strip()
+            schema = env_str("DATABASE_SCHEMA")
             if schema:
                 from .pgcompat import apply_schema
 
@@ -160,36 +175,27 @@ def get_config() -> Config:
     users_raw = os.getenv("DASHBOARD_USERS", "")
     dashboard_users = load_users(users_raw)
     # Su Vercel il processo e' effimero: niente scheduler in background, niente disco.
-    serverless = env_bool("SERVERLESS", bool(os.getenv("VERCEL")))
+    serverless = env_bool("SERVERLESS", bool(env_str("VERCEL")))
     # In container (Fly/Render/Railway) la porta arriva da PORT: li' serve 0.0.0.0.
-    default_host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"
+    default_host = "0.0.0.0" if env_str("PORT") else "127.0.0.1"
     return Config(
         root=root,
         db_path=root / "data" / "monitor.sqlite3",
         rules_path=root / "config" / "rules.json",
         static_dir=root / "static",
         mock_dir=root / "mock",
-        shopify_shop=os.getenv("SHOPIFY_SHOP", "").strip().replace(".myshopify.com", ""),
-        shopify_client_id=os.getenv("SHOPIFY_CLIENT_ID", "").strip(),
-        shopify_client_secret=os.getenv("SHOPIFY_CLIENT_SECRET", "").strip(),
-        shopify_api_version=os.getenv("SHOPIFY_API_VERSION", "2026-07").strip(),
+        shopify_shop=env_str("SHOPIFY_SHOP").replace(".myshopify.com", ""),
+        shopify_client_id=env_str("SHOPIFY_CLIENT_ID"),
+        shopify_client_secret=env_str("SHOPIFY_CLIENT_SECRET"),
+        shopify_api_version=env_str("SHOPIFY_API_VERSION", "2026-07"),
         shopify_lookback_days=env_int("SHOPIFY_LOOKBACK_DAYS", 21),
-        gls_site=os.getenv("GLS_SITE", "").strip(),
-        gls_customer_code=os.getenv("GLS_CUSTOMER_CODE", "").strip(),
-        gls_contract_code=os.getenv("GLS_CONTRACT_CODE", "").strip(),
-        gls_password=os.getenv("GLS_PASSWORD", "").strip(),
-        gls_track_endpoint=os.getenv(
-            "GLS_TRACK_ENDPOINT",
-            "https://wwwdr.gls-italy.com/XML/get_xml_track.php",
-        ).strip(),
-        gls_list_endpoint=os.getenv(
-            "GLS_LIST_ENDPOINT",
-            "https://labelservice.gls-italy.com/ilswebservice.asmx/ListSped",
-        ).strip(),
-        gls_release_endpoint=os.getenv(
-            "GLS_RELEASE_ENDPOINT",
-            "https://labelservice.gls-italy.com/ilswebservice.asmx/ReleaseShipmentStock",
-        ).strip(),
+        gls_site=env_str("GLS_SITE"),
+        gls_customer_code=env_str("GLS_CUSTOMER_CODE"),
+        gls_contract_code=env_str("GLS_CONTRACT_CODE"),
+        gls_password=env_str("GLS_PASSWORD"),
+        gls_track_endpoint=env_str("GLS_TRACK_ENDPOINT", "https://wwwdr.gls-italy.com/XML/get_xml_track.php"),
+        gls_list_endpoint=env_str("GLS_LIST_ENDPOINT", "https://labelservice.gls-italy.com/ilswebservice.asmx/ListSped"),
+        gls_release_endpoint=env_str("GLS_RELEASE_ENDPOINT", "https://labelservice.gls-italy.com/ilswebservice.asmx/ReleaseShipmentStock"),
         gls_accept_unlabeled_tracking=env_bool("GLS_ACCEPT_UNLABELED_TRACKING", False),
         auto_sync=env_bool("AUTO_SYNC", True),
         sync_interval_minutes=max(1, env_int("SYNC_INTERVAL_MINUTES", 10)),
@@ -199,10 +205,10 @@ def get_config() -> Config:
         gls_public_workers=max(1, min(4, env_int("GLS_PUBLIC_WORKERS", 2))),
         gls_retry_attempts=max(1, min(5, env_int("GLS_RETRY_ATTEMPTS", 3))),
         request_timeout_seconds=max(5, env_int("REQUEST_TIMEOUT_SECONDS", 20)),
-        app_host=os.getenv("APP_HOST", default_host).strip(),
+        app_host=env_str("APP_HOST", default_host),
         app_port=env_int("PORT", env_int("APP_PORT", 8787)),
-        dashboard_user=os.getenv("DASHBOARD_USER", "").strip(),
-        dashboard_password=os.getenv("DASHBOARD_PASSWORD", "").strip(),
+        dashboard_user=env_str("DASHBOARD_USER"),
+        dashboard_password=env_str("DASHBOARD_PASSWORD"),
         mock_mode=env_bool("MOCK_MODE", False),
         dashboard_users=dashboard_users,
         session_secret=derive_secret(users_raw, os.getenv("SESSION_SECRET", "")),
@@ -212,5 +218,5 @@ def get_config() -> Config:
         database_url=database_url,
         serverless=serverless,
         public_deployment=env_bool("PUBLIC_DEPLOYMENT", serverless),
-        cron_secret=os.getenv("CRON_SECRET", "").strip(),
+        cron_secret=env_str("CRON_SECRET"),
     )
