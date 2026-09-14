@@ -477,7 +477,37 @@ function renderTable() {
       </tr>`;
   }).join('');
   empty.classList.toggle('hidden', rows.length !== 0);
+  if (rows.length === 0) renderEmptyState(empty, total);
   $$('[data-open]').forEach(btn => btn.addEventListener('click', () => openDrawer(btn.dataset.open)));
+}
+
+function renderEmptyState(empty, monitored) {
+  // Una vista vuota non significa "nessuna spedizione": le code operative
+  // mostrano solo cio' che richiede attenzione. Senza distinguere i due casi
+  // sembra che la sincronizzazione non abbia caricato nulla.
+  const nessunDato = monitored === 0;
+  const plurale = monitored === 1 ? 'spedizione GLS attiva' : 'spedizioni GLS attive';
+  const vaiATutte = `<button class="btn secondary" type="button" data-goto-view="active">Vedi tutte le spedizioni</button>`;
+
+  const messaggi = {
+    action: nessunDato
+      ? ['Nessuna spedizione caricata', 'Premi <b>Aggiorna</b> per la prima sincronizzazione con Shopify e GLS.']
+      : ['Nessuna spedizione da verificare',
+         `Le <b>${monitored}</b> ${plurale} stanno viaggiando senza anomalie. Qui compaiono solo i casi che richiedono un intervento.`],
+    working: ['Nessuna pratica in lavorazione',
+              'Compaiono qui le spedizioni che un operatore ha preso in carico dal pannello <b>Gestisci</b>.'],
+    active: nessunDato
+      ? ['Nessuna spedizione caricata', 'Premi <b>Aggiorna</b> per la prima sincronizzazione con Shopify e GLS.']
+      : ['Nessuna spedizione attiva', 'Tutte le spedizioni monitorate hanno raggiunto un esito finale.'],
+    delivered: ['Nessuna consegna registrata', 'Qui finiscono le spedizioni consegnate al cliente.'],
+    returned: ['Nessun rientro registrato', 'Qui finiscono le spedizioni tornate al mittente.'],
+    unknown: ['Nessuno stato GLS sconosciuto', 'Tutti gli stati ricevuti sono gia' + String.fromCharCode(39) + ' classificati dalle regole.'],
+  };
+
+  const [titolo, dettaglio] = messaggi[state.view] || ['Niente da mostrare', ''];
+  const mostraPulsante = !nessunDato && state.view !== 'active';
+  empty.innerHTML = `<div class="empty-icon">✓</div><h3>${titolo}</h3><p>${dettaglio}</p>${mostraPulsante ? `<div class="empty-actions">${vaiATutte}</div>` : ''}`;
+  empty.querySelector('[data-goto-view]')?.addEventListener('click', () => switchView('active'));
 }
 
 async function loadInconsistencies({quiet=false} = {}) {
