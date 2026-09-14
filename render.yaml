@@ -1,0 +1,51 @@
+# Deploy su hosting a container: il monitor torna a girare come processo sempre
+# acceso, senza tempo massimo per richiesta e con lo scheduler interno attivo.
+services:
+  - type: web
+    name: gls-monitor
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: claude/determined-bell-1z8yj3
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /login
+    envVars:
+      # Nessun limite: qui una sincronizzazione puo' arrivare in fondo.
+      - key: SYNC_MAX_TRACKING
+        value: "0"
+      - key: SYNC_TIME_BUDGET_SECONDS
+        value: "0"
+      - key: SERVERLESS
+        value: "false"
+      - key: PUBLIC_DEPLOYMENT
+        value: "true"
+      - key: AUTO_SYNC
+        value: "true"
+      - key: SYNC_INTERVAL_MINUTES
+        value: "10"
+      - key: MOCK_MODE
+        value: "false"
+      # I valori riservati si impostano dal pannello, non qui.
+      - key: DATABASE_URL
+        sync: false
+      - key: DASHBOARD_USERS
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: SHOPIFY_SHOP
+        sync: false
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
+      - key: GLS_SITE
+        sync: false
+      - key: GLS_CUSTOMER_CODE
+        sync: false
+      - key: GLS_CONTRACT_CODE
+        sync: false
+      - key: GLS_PASSWORD
+        sync: false
