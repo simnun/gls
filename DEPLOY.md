@@ -264,6 +264,39 @@ Dopo il deploy:
 
 ---
 
+## 9. Se qualcosa non funziona
+
+Apri `https://IL-TUO-PROGETTO.vercel.app/api/status`. Risponde anche quando la
+configurazione è incompleta e dice cosa manca, senza mostrare alcun segreto:
+
+```json
+{
+  "ok": true,
+  "python": "3.12.x",
+  "tzdata": true,
+  "storage": "postgres",
+  "database": "raggiungibile",
+  "configurato": {
+    "database_url": true, "operatori": 3, "shopify": true,
+    "gls_tracking": true, "cron_secret": true, "mock_mode": false
+  }
+}
+```
+
+| Cosa vedi | Cosa significa |
+|---|---|
+| `"database": "errore"` con `database_errore` | La `DATABASE_URL` è sbagliata o Supabase non risponde. Il messaggio dice quale delle due: host non risolto, autenticazione fallita, connessione rifiutata. |
+| `DATABASE_URL non impostata` | Manca la variabile. Online è obbligatoria: il disco di Vercel non conserva nulla tra una richiesta e l'altra. |
+| `"avviso"` su `DASHBOARD_USERS` | Nessun operatore configurato: il monitor non mostra dati finché non ne aggiungi. |
+| `"tzdata": false` | Manca il pacchetto `tzdata`: gli orari slittano a UTC. Verifica che `requirements.txt` sia stato installato. |
+| `"operatori": 0` con la variabile impostata | Il JSON di `DASHBOARD_USERS` non è valido. Rigeneralo con `genera_utenti.py`. |
+| `FUNCTION_INVOCATION_FAILED` | Errore prima ancora che l'applicazione parta: quasi sempre una dipendenza non installata. Guarda il log del build su Vercel. |
+
+Un errore di autenticazione Postgres significa quasi sempre che la `@` della
+password non è stata codificata come `%40` nella stringa di connessione.
+
+---
+
 ## Alternativa: un contenitore invece di Vercel
 
 Se in futuro il limite di tempo per richiesta dovesse dare fastidio, lo stesso
