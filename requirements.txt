@@ -1,0 +1,3 @@
+# Solo per il deploy online su Postgres/Supabase.
+# In locale su SQLite il progetto resta senza dipendenze esterne.
+psycopg[binary]==3.3.5

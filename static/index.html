@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>GLS Operations Monitor</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-block">
+      <div class="brand-mark">G</div>
+      <div><div class="eyebrow">ZUIKI · OPERATIONS</div><h1>GLS Monitor</h1><p>Eccezioni, giacenze, interventi e incongruenze in un'unica coda operativa.</p></div>
+    </div>
+    <div class="header-actions">
+      <label class="operator-field" title="Il nome viene memorizzato solo in questo browser"><span>Operatore</span><input id="operatorInput" type="text" maxlength="60" placeholder="Il tuo nome" autocomplete="name"></label>
+      <span id="connectionBadge" class="status-chip neutral"><span class="status-dot"></span> Caricamento…</span>
+      <button id="diagnosticsBtn" class="btn ghost">Diagnostica</button>
+      <button id="syncBtn" class="btn primary"><span class="btn-icon">↻</span> Aggiorna</button>
+    </div>
+  </header>
+
+  <div id="syncPanel" class="sync-panel hidden" role="status" aria-live="polite">
+    <div class="sync-panel-inner">
+      <div class="sync-main">
+        <div class="sync-copy"><div class="sync-spinner" id="syncSpinner"></div><div><strong id="syncLabel">Sincronizzazione…</strong><span id="syncDetail">Preparazione</span></div></div>
+        <div class="sync-numbers"><strong id="syncPercent">—</strong><span id="syncEta">Calcolo tempo…</span></div>
+      </div>
+      <div class="progress-track"><div id="syncProgressBar" class="progress-bar"></div></div>
+      <div class="sync-foot"><span id="syncProcessed">0 / 0 spedizioni</span><span id="syncResults">0 aggiornate · 0 errori</span></div>
+    </div>
+  </div>
+
+  <main class="page-shell">
+    <section id="notice" class="notice hidden"></section>
+
+    <section class="overview-grid overview-grid-v25" aria-label="Riepilogo operativo">
+      <button class="metric-card danger" data-view-target="action"><span class="metric-icon">!</span><span class="metric-copy"><small>Da verificare</small><strong id="kpiVerify">0</strong><em>tutte le priorità operative</em></span></button>
+      <button class="metric-card watch" data-severity="WATCH"><span class="metric-icon">◷</span><span class="metric-copy"><small>Osservazione</small><strong id="kpiWatch">0</strong><em>monitor automatico</em></span></button>
+      <button class="metric-card progress" data-view-target="working"><span class="metric-icon">✓</span><span class="metric-copy"><small>In lavorazione</small><strong id="kpiWorking">0</strong><em>pratiche già prese in carico</em></span></button>
+      <button class="metric-card danger-soft" data-view-target="inconsistencies"><span class="metric-icon">⚠</span><span class="metric-copy"><small>Incongruenze</small><strong id="kpiInconsistencies">0</strong><em>priorità massima</em></span></button>
+    </section>
+
+    <section class="workspace-card">
+      <div class="workspace-top">
+        <nav class="tabs" aria-label="Viste spedizioni">
+          <button class="tab active" data-view="action"><span>Da verificare</span><b id="tabActionCount">0</b></button>
+          <button class="tab" data-view="working"><span>In lavorazione</span><b id="tabWorkingCount">0</b></button>
+          <button class="tab" data-view="active"><span>Tutte GLS</span></button>
+          <button class="tab delivered-tab" data-view="delivered"><span>Consegnati</span><b id="tabDeliveredCount">0</b></button>
+          <button class="tab returned-tab" data-view="returned"><span>Rientrati</span><b id="tabReturnedCount">0</b></button>
+          <button class="tab" data-view="inconsistencies"><span>Incongruenze</span><b id="tabInconsistencyCount">0</b></button>
+          <button class="tab" data-view="stocks"><span>Storico giacenze</span><b id="tabStockCount">0</b></button>
+          <button class="tab" data-view="unknown"><span>Stati nuovi</span></button>
+          <button class="tab" data-view="rules"><span>Regole</span></button>
+        </nav>
+        <div id="lastSync" class="last-sync">Mai aggiornato</div>
+      </div>
+
+      <div id="filters" class="filter-bar">
+        <div class="search-wrap"><span class="search-icon">⌕</span><input id="searchInput" type="search" placeholder="Ordine, cliente, tracking o stato GLS…" autocomplete="off"></div>
+        <select id="severityFilter" aria-label="Priorità"><option value="">Tutte le priorità</option><option value="CRITICAL">Massima</option><option value="WARNING">Alta</option><option value="WATCH">Osservazione</option><option value="INFO">Informativo</option><option value="NORMAL">Normale</option></select>
+        <select id="workflowFilter" aria-label="Lavorazione"><option value="">Tutte le lavorazioni</option><option value="NEW">Da verificare</option><option value="IN_PROGRESS">In lavorazione</option><option value="RESOLVED">Chiusa</option></select>
+        <div class="quick-dates" aria-label="Intervallo rapido"><button type="button" data-days="0">Oggi</button><button type="button" data-days="7">7g</button><button type="button" data-days="30">30g</button></div>
+        <div class="date-range" title="Filtra per data ordine Shopify"><label>Dal <input id="dateFrom" type="date"></label><span>→</span><label>Al <input id="dateTo" type="date"></label></div>
+        <label class="toggle-check"><input id="codOnly" type="checkbox"><span></span> Solo COD</label>
+        <button id="resetFilters" class="btn subtle">Azzera</button>
+      </div>
+
+      <section id="shipmentsPanel" class="table-section">
+        <div class="section-heading"><div><h2 id="tableTitle">Spedizioni da verificare</h2><p id="tableMeta">—</p></div><div class="legend"><span class="legend-dot danger"></span>massima <span class="legend-dot warning"></span>alta <span class="legend-dot worked"></span>lavorata</div></div>
+        <div class="table-wrap">
+          <table id="shipmentsTable" class="data-table shipments-table">
+            <colgroup><col class="c-priority"><col class="c-order"><col class="c-client"><col class="c-status"><col class="c-updated"><col class="c-work"><col class="c-actions"></colgroup>
+            <thead><tr>
+              <th><button class="sort-head" data-sort="priority">Priorità <span></span></button></th>
+              <th><button class="sort-head" data-sort="order">Ordine <span></span></button></th>
+              <th><button class="sort-head" data-sort="customer">Cliente <span></span></button></th>
+              <th><button class="sort-head" data-sort="status">Stato GLS <span></span></button></th>
+              <th><button class="sort-head" data-sort="updated">Aggiornato <span></span></button></th>
+              <th><button class="sort-head" data-sort="workflow">Lavorazione interna <span></span></button></th>
+              <th>Gestisci</th>
+            </tr></thead>
+            <tbody id="shipmentsBody"></tbody>
+          </table>
+          <div id="emptyState" class="empty-state hidden"><div class="empty-icon">✓</div><h3>Niente da mostrare</h3><p>Il monitor continuerà a controllare automaticamente gli aggiornamenti GLS.</p></div>
+        </div>
+      </section>
+
+      <section id="inconsistencyPanel" class="table-section hidden">
+        <div class="section-heading">
+          <div><h2>Incongruenze operative GLS</h2><p id="inconsistencyMeta">Confronto automatico tra tracking, giacenze e istruzioni degli operatori.</p></div>
+          <a class="btn danger-btn" href="/api/inconsistencies/export.xlsx">Scarica Excel per GLS</a>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table inconsistency-table">
+            <colgroup><col style="width:12%"><col style="width:12%"><col style="width:16%"><col style="width:25%"><col style="width:25%"><col style="width:10%"></colgroup>
+            <thead><tr><th><button class="sort-head inc-sort" data-sort="priority">Priorità <span></span></button></th><th><button class="sort-head inc-sort" data-sort="order">Ordine <span></span></button></th><th><button class="sort-head inc-sort" data-sort="customer">Cliente <span></span></button></th><th><button class="sort-head inc-sort" data-sort="issue">Incongruenza <span></span></button></th><th><button class="sort-head inc-sort" data-sort="detected">Rilevata <span></span></button></th><th>Gestisci</th></tr></thead>
+            <tbody id="inconsistencyBody"></tbody>
+          </table>
+          <div id="inconsistencyEmpty" class="empty-state hidden"><div class="empty-icon">✓</div><h3>Nessuna incongruenza attiva</h3><p>Le anomalie logiche verranno evidenziate automaticamente.</p></div>
+        </div>
+      </section>
+
+      <section id="stockPanel" class="table-section hidden">
+        <div class="stock-summary-grid"><div class="stock-summary-card"><span>Giacenze totali</span><strong id="stockTotal">0</strong></div><div class="stock-summary-card danger"><span>Ancora aperte</span><strong id="stockOpen">0</strong></div><div class="stock-summary-card worked"><span>Gestite dal team</span><strong id="stockHandled">0</strong></div><div class="stock-summary-card success"><span>Consegnate dopo gestione</span><strong id="stockDelivered">0</strong></div><div class="stock-summary-card"><span>Rientrate</span><strong id="stockReturned">0</strong></div></div>
+        <div class="stock-filter-bar"><div class="search-wrap"><span class="search-icon">⌕</span><input id="stockSearch" type="search" placeholder="Ordine, cliente, tracking, istruzione…"></div><select id="stockOutcomeFilter"><option value="">Tutti gli esiti</option><option value="OPEN">Ancora in giacenza</option><option value="DELIVERED">Consegnata</option><option value="RETURN">Rientro</option><option value="MOVED">Ripartita / riconsegna</option></select><select id="stockHandledFilter"><option value="">Tutte</option><option value="yes">Solo gestite</option><option value="no">Solo non gestite</option></select><label>Dal <input id="stockDateFrom" type="date"></label><label>Al <input id="stockDateTo" type="date"></label><button id="stockReset" class="btn subtle">Azzera</button></div>
+        <div class="section-heading"><div><h2>Storico giacenze GLS</h2><p id="stockMeta">Tutte le giacenze viste dal monitor, anche dopo consegna o rientro.</p></div></div>
+        <div class="table-wrap"><table class="data-table stock-table"><thead><tr><th><button class="sort-head stock-sort" data-sort="outcome">Esito <span></span></button></th><th><button class="sort-head stock-sort" data-sort="order">Ordine <span></span></button></th><th><button class="sort-head stock-sort" data-sort="customer">Cliente <span></span></button></th><th><button class="sort-head stock-sort" data-sort="entered">Entrata in giacenza <span></span></button></th><th><button class="sort-head stock-sort" data-sort="activity">Istruzione / attività <span></span></button></th><th><button class="sort-head stock-sort" data-sort="current">Stato attuale <span></span></button></th><th>Gestisci</th></tr></thead><tbody id="stockBody"></tbody></table><div id="stockEmpty" class="empty-state hidden"><div class="empty-icon">◷</div><h3>Nessuna giacenza trovata</h3><p>Lo storico si popola automaticamente dagli eventi GLS memorizzati.</p></div></div>
+      </section>
+
+      <section id="rulesPanel" class="rules-panel hidden"><div class="section-heading"><div><h2>Regole di classificazione</h2><p>I codici classificati manualmente hanno precedenza sulle regole testuali.</p></div></div><div id="rulesContent" class="rules-grid"></div></section>
+    </section>
+  </main>
+
+  <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="drawer" class="drawer" aria-hidden="true"><div class="drawer-header"><div><div id="drawerOrder" class="eyebrow"></div><h2 id="drawerTitle">Dettaglio spedizione</h2></div><button id="drawerClose" class="icon-btn" aria-label="Chiudi">×</button></div><div id="drawerContent" class="drawer-content"></div></aside>
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+.env
+data/monitor.sqlite3
+__pycache__/
+*.pyc
+.DS_Store

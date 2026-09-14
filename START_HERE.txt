@@ -1,0 +1,46 @@
+GLS EXCEPTION MONITOR - BUILD V2.9 REALE
+
+AVVIO SU MAC
+1. Ferma la versione precedente con Control+C.
+2. Decomprimi questa cartella accanto alla versione precedente.
+3. Fai doppio clic su run.command.
+4. Se macOS blocca il file: tasto destro > Apri > Apri.
+5. Si apre http://127.0.0.1:8787
+
+IMPORTAZIONE DATI
+Al primo avvio il programma prova a importare automaticamente il database della versione precedente.
+Se la vecchia cartella e altrove, usa IMPORTA_DATI_PRECEDENTI.command.
+
+
+NOVITA V2.9
+- I tracking creati oggi ma non ancora ritirati da GLS non sono piu errori tecnici.
+- Sono mostrati come IN ATTESA DI PRESA IN CARICO GLS.
+- Tolleranza fino alle 12:00 del primo giorno lavorativo successivo.
+- Se GLS continua a non pubblicare eventi oltre la soglia, la spedizione passa in DA VERIFICARE.
+- Gli errori tecnici reali (rete, timeout, 429/5xx, parser) restano separati.
+
+NOVITA V2.7
+- CHIUSA ora rimuove le incongruenze gia gestite dalle liste operative.
+- Consegnati e Rientrati sono entrambi esiti finali/chiusi.
+- Solo un nuovo stato GLS problematico puo riaprire una pratica chiusa.
+
+NOVITA V2.6
+
+- Sincronizzazione incrementale: le spedizioni CONSEGNATE o RIENTRATE non vengono piu interrogate a ogni sync.
+- Le spedizioni ancora aperte restano monitorate anche se sono piu vecchie del lookback Shopify.
+- Il banner degli errori tecnici ora mostra causa, tracking interessati e soluzione consigliata.
+- Retry automatici e protezione anti-raffica sul fallback pubblico GLS.
+- DA VERIFICARE unifica le priorita operative.
+- Nuovi tab CONSEGNATI, RIENTRATI e INCONGRUENZE.
+- Tabelle allineate e colonne informative ordinabili crescente/decrescente.
+- Tracking GLS aperto dalla pagina ufficiale in Chrome Incognito.
+- Contatta cliente apre Spoki con il numero del cliente.
+- Ordine Shopify + Profilo Shopify.
+- Storico unico GLS + attivita team.
+- Stato pratica IN LAVORAZIONE / CHIUSA con riapertura automatica se arriva una nuova anomalia.
+- Motore di incongruenze tracking/svincoli/giacenze.
+- Esportazione Excel delle incongruenze per GLS.
+- Gestione giacenza: preavviso telefonico predefinito e numero senza prefisso internazionale italiano.
+
+IMPORTANTE
+Il file .env contiene configurazione reale: non condividere la cartella o lo ZIP.

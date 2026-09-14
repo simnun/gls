@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<ELENCO>
+  <SPEDIZIONE>
+    <NumSped>ABC123</NumSped>
+    <Bda>ORDER-123</Bda>
+    <DataPartenza>08/09/2026</DataPartenza>
+    <SedePartenza>NI</SedePartenza>
+    <Destinatario>Cliente Test</Destinatario>
+    <CittaDestinazione>Roma</CittaDestinazione>
+    <SedeDestinazione>RM</SedeDestinazione>
+    <LocalitaSedeDestinazione>Roma</LocalitaSedeDestinazione>
+    <TelefonoSedeDestinazione>060000000</TelefonoSedeDestinazione>
+    <StatoSpedizione>La spedizione e' stata rifiutata.</StatoSpedizione>
+    <DataConsegna>09/09/2026</DataConsegna>
+    <Note>Contattare il mittente per programmare la riconsegna.</Note>
+    <Codice>999</Codice>
+    <TRACKING>
+      <Data>08/09/2026</Data><Ora>18:00</Ora><Luogo>Nola</Luogo><Stato>Partita dalla sede</Stato><Note></Note><Codice>100</Codice>
+      <Data>09/09/2026</Data><Ora>08:00</Ora><Luogo>Roma</Luogo><Stato>In consegna</Stato><Note></Note><Codice>200</Codice>
+      <Data>09/09/2026</Data><Ora>11:30</Ora><Luogo>Roma</Luogo><Stato>La spedizione e' stata rifiutata.</Stato><Note>Contattare il mittente per programmare la riconsegna.</Note><Codice>999</Codice>
+    </TRACKING>
+  </SPEDIZIONE>
+</ELENCO>

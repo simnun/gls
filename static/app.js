@@ -1,0 +1,968 @@
+const state = {
+  data: null,
+  view: 'action',
+  severity: '',
+  workflow: '',
+  codOnly: false,
+  search: '',
+  dateFrom: '',
+  dateTo: '',
+  selectedTracking: null,
+  syncTimer: null,
+  stockData: null,
+  stockSearch: '',
+  stockOutcome: '',
+  stockHandled: '',
+  stockDateFrom: '',
+  stockDateTo: '',
+  sortKey: 'priority',
+  sortDir: 'desc',
+  stockSortKey: 'entered',
+  stockSortDir: 'desc',
+  inconsistencyData: [],
+  inconsistencySortKey: 'detected',
+  inconsistencySortDir: 'desc',
+};
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+const severityLabels = {
+  CRITICAL: 'MASSIMA', WARNING: 'ALTA', WATCH: 'OSSERVAZIONE',
+  INFO: 'INFORMATIVO', NORMAL: 'NORMALE'
+};
+const workflowLabels = {
+  NEW: 'Da verificare', IN_PROGRESS: 'In lavorazione', WAITING_CUSTOMER: 'In lavorazione',
+  WAITING_GLS: 'In lavorazione', RESOLVED: 'Chiusa', IGNORED: 'Chiusa'
+};
+
+function esc(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+}
+
+function formatMoney(amount, currency) {
+  if (amount == null || amount === '') return '—';
+  try { return new Intl.NumberFormat('it-IT', { style: 'currency', currency: currency || 'EUR' }).format(Number(amount)); }
+  catch { return `${amount} ${currency || ''}`.trim(); }
+}
+
+function formatDate(value, withTime = true) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return new Intl.DateTimeFormat('it-IT', withTime
+    ? { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }
+    : { day:'2-digit', month:'2-digit', year:'numeric' }).format(d);
+}
+
+function localDateKey(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function dateKeyFromDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+
+function phoneDigits(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+function localItalianPhone(value) {
+  let digits = phoneDigits(value);
+  if (digits.startsWith('0039')) digits = digits.slice(4);
+  else if (digits.startsWith('39') && digits.length > 10) digits = digits.slice(2);
+  return digits;
+}
+function orderNumeric(value) {
+  const m = String(value || '').match(/\d+/g);
+  return m ? Number(m.join('')) : 0;
+}
+function priorityRank(row) {
+  if (row.has_inconsistency) return 6;
+  return {CRITICAL:5, WARNING:4, WATCH:3, INFO:2, NORMAL:1}[row.effective_severity || row.severity] || 0;
+}
+function cmpText(a,b) { return String(a ?? '').localeCompare(String(b ?? ''), 'it', {numeric:true, sensitivity:'base'}); }
+function cmpDate(a,b) { return (new Date(a || 0).getTime() || 0) - (new Date(b || 0).getTime() || 0); }
+function sortRows(rows, key, dir, getter) {
+  const mult = dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a,b) => {
+    const [av,bv,type] = getter(key,a,b);
+    const c = type === 'number' ? Number(av || 0) - Number(bv || 0) : type === 'date' ? cmpDate(av,bv) : cmpText(av,bv);
+    if (c !== 0) return c * mult;
+    return cmpText(a.tracking_number, b.tracking_number) * mult;
+  });
+}
+function updateSortIndicators(selector, key, dir) {
+  $$(selector).forEach(btn => {
+    const span = btn.querySelector('span');
+    if (!span) return;
+    span.textContent = btn.dataset.sort === key ? (dir === 'asc' ? '↑' : '↓') : '↕';
+    btn.classList.toggle('active', btn.dataset.sort === key);
+  });
+}
+
+function age(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  const mins = Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  if (mins < 2) return 'adesso';
+  if (mins < 60) return `${mins} min fa`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours} h fa`;
+  return `${Math.floor(hours / 24)} g fa`;
+}
+
+function formatEta(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return 'Calcolo tempo…';
+  const s = Math.max(0, Math.round(Number(seconds)));
+  if (s < 3) return 'Quasi fatto';
+  if (s < 60) return `~ ${s} sec rimanenti`;
+  const m = Math.ceil(s / 60);
+  return `~ ${m} min rimanenti`;
+}
+
+function getOperatorName(requireName = false) {
+  const name = ($('#operatorInput')?.value || '').trim();
+  if (requireName && !name) {
+    showToast('Inserisci il tuo nome nel campo Operatore prima di registrare un’azione.', true);
+    $('#operatorInput')?.focus();
+    return null;
+  }
+  return name;
+}
+
+function showToast(message, error = false) {
+  const el = $('#toast');
+  el.textContent = message;
+  el.className = `toast${error ? ' error' : ''}`;
+  el.classList.remove('hidden');
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => el.classList.add('hidden'), 3300);
+}
+
+function showNotice(text) {
+  const n = $('#notice');
+  n.textContent = text;
+  n.classList.remove('hidden');
+}
+function hideNotice() { $('#notice').classList.add('hidden'); }
+
+function showTechnicalNotice(lastSync) {
+  const n = $('#notice');
+  const total = Number(lastSync?.gls_errors || 0);
+  const groups = Array.isArray(lastSync?.error_summary) ? lastSync.error_summary : [];
+  const samples = Array.isArray(lastSync?.error_samples) ? lastSync.error_samples : [];
+  const skipped = Number(lastSync?.skipped_closed || 0);
+  const updated = Number(lastSync?.gls_success || 0);
+  const groupHtml = groups.length ? groups.map(g => `
+    <div class="tech-error-group">
+      <div class="tech-error-head"><strong>${esc(g.count)} × ${esc(g.error_title || g.error_code)}</strong><code>${esc(g.error_code || '')}</code></div>
+      <div class="tech-error-help">${esc(g.resolution_hint || '')}</div>
+    </div>`).join('') : '<div class="tech-error-help">Il monitor ha registrato il messaggio tecnico ma non e ancora riuscito a classificarlo.</div>';
+  const sampleHtml = samples.length ? `
+    <div class="tech-error-samples">
+      <strong>Esempi interessati</strong>
+      ${samples.slice(0, 10).map(x => `<div><code>${esc(x.tracking_number || '—')}</code> · ${esc(x.error_title || x.error_code || 'Errore')}<br><span>${esc(x.error_message || '')}</span></div>`).join('')}
+    </div>` : '';
+  n.innerHTML = `
+    <div class="notice-main"><strong>${total} tracking GLS non aggiornati</strong><span>Lo stato precedente e stato mantenuto: nessuna falsa anomalia viene creata.</span></div>
+    <details class="tech-error-details">
+      <summary>Capisci il problema e come risolverlo</summary>
+      <div class="tech-sync-summary">${updated} aggiornati${skipped ? ` · ${skipped} spedizioni finali escluse automaticamente` : ''}</div>
+      ${groupHtml}${sampleHtml}
+    </details>`;
+  n.classList.remove('hidden');
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    cache: 'no-store'
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch {}
+  if (!response.ok) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
+  return payload;
+}
+
+function applyDateFilter(rows) {
+  if (!state.dateFrom && !state.dateTo) return rows;
+  return rows.filter(x => {
+    const key = localDateKey(x.order_created_at);
+    if (!key) return false;
+    if (state.dateFrom && key < state.dateFrom) return false;
+    if (state.dateTo && key > state.dateTo) return false;
+    return true;
+  });
+}
+
+function stockOutcomeKey(item) {
+  if (item.status === 'OPEN') return 'OPEN';
+  const c = String(item.outcome_category || '').toUpperCase();
+  if (c === 'DELIVERED') return 'DELIVERED';
+  if (c === 'RETURN') return 'RETURN';
+  if (['OUT_FOR_DELIVERY','SCHEDULED','IN_TRANSIT','CORRESPONDENT','SERVICE_AREA','LINEHAUL_DELAY'].includes(c)) return 'MOVED';
+  return 'OTHER';
+}
+
+function stockOutcomeBadge(item) {
+  const key = stockOutcomeKey(item);
+  const labels = { OPEN:'IN GIACENZA', DELIVERED:'CONSEGNATA', RETURN:'RIENTRO', MOVED:'RIPARTITA', OTHER:'DA VERIFICARE' };
+  const cls = { OPEN:'danger', DELIVERED:'success', RETURN:'warning', MOVED:'worked', OTHER:'neutral' };
+  return `<span class="stock-outcome ${cls[key] || 'neutral'}">${esc(labels[key] || key)}</span>`;
+}
+
+async function loadStockHistory({quiet = false} = {}) {
+  try {
+    state.stockData = await api('/api/stocks');
+    renderStockHistory();
+  } catch (err) {
+    if (!quiet) showToast(`Storico giacenze non disponibile: ${err.message}`, true);
+  }
+}
+
+function filteredStockCases() {
+  let rows = [...(state.stockData?.cases || [])];
+  if (state.stockSearch) {
+    const q = state.stockSearch.toLowerCase();
+    rows = rows.filter(x => {
+      const instruction = x.latest_instruction?.release_label || x.latest_action?.action_label || '';
+      return [x.order_name, x.customer_name, x.tracking_number, x.entry_state, x.entry_note, x.outcome_state, x.gls_status, instruction, x.last_operator_name]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+  }
+  if (state.stockOutcome) rows = rows.filter(x => stockOutcomeKey(x) === state.stockOutcome);
+  if (state.stockHandled === 'yes') rows = rows.filter(x => x.handled);
+  if (state.stockHandled === 'no') rows = rows.filter(x => !x.handled);
+  if (state.stockDateFrom || state.stockDateTo) {
+    rows = rows.filter(x => {
+      const k = localDateKey(x.entered_at || x.created_at);
+      if (!k) return false;
+      if (state.stockDateFrom && k < state.stockDateFrom) return false;
+      if (state.stockDateTo && k > state.stockDateTo) return false;
+      return true;
+    });
+  }
+  rows = sortRows(rows, state.stockSortKey, state.stockSortDir, (key,a,b) => {
+    const instructionA = a.latest_instruction?.release_label || a.latest_action?.action_label || '';
+    const instructionB = b.latest_instruction?.release_label || b.latest_action?.action_label || '';
+    const map = {
+      outcome:[stockOutcomeKey(a), stockOutcomeKey(b),'text'],
+      order:[orderNumeric(a.order_name), orderNumeric(b.order_name),'number'],
+      customer:[a.customer_name,b.customer_name,'text'],
+      entered:[a.entered_at || a.created_at,b.entered_at || b.created_at,'date'],
+      activity:[instructionA,instructionB,'text'],
+      current:[a.outcome_state || a.gls_status,b.outcome_state || b.gls_status,'text'],
+    };
+    return map[key] || map.entered;
+  });
+  return rows;
+}
+
+function renderStockHistory() {
+  const summary = state.stockData?.summary || {};
+  const rows = filteredStockCases();
+  $('#stockTotal').textContent = summary.total || 0;
+  $('#stockOpen').textContent = summary.open || 0;
+  $('#stockHandled').textContent = summary.handled || 0;
+  $('#stockDelivered').textContent = summary.delivered || 0;
+  $('#stockReturned').textContent = summary.returned || 0;
+  $('#tabStockCount').textContent = summary.total || 0;
+  $('#stockMeta').textContent = `${rows.length} casi nella vista · ${summary.total || 0} giacenze storiche memorizzate`;
+  updateSortIndicators('.stock-sort', state.stockSortKey, state.stockSortDir);
+  const body = $('#stockBody');
+  const empty = $('#stockEmpty');
+  body.innerHTML = rows.map(item => {
+    const instruction = item.latest_instruction;
+    const action = item.latest_action;
+    const actionText = instruction?.release_label || action?.action_label || 'Nessuna istruzione registrata';
+    const actionBy = instruction?.operator_name || action?.operator_name || '';
+    const actionAt = instruction?.created_at || action?.created_at || '';
+    const glsResult = instruction ? (instruction.gls_success ? `GLS: ${instruction.gls_result || 'OK'}` : `Errore GLS: ${instruction.gls_result || 'non confermato'}`) : '';
+    return `<tr class="shipment-row ${item.status === 'OPEN' ? 'CRITICAL' : ''}">
+      <td>${stockOutcomeBadge(item)}</td>
+      <td><div class="order-main">${esc(item.order_name || '—')}</div><div class="tracking-code">${esc(item.tracking_number)}</div>${item.is_cod ? '<div class="cod-badge">COD</div>' : ''}</td>
+      <td><div class="customer-main">${esc(item.customer_name || '—')}</div><div class="cell-sub">${esc([item.city,item.province].filter(Boolean).join(' · '))}</div></td>
+      <td><strong>${esc(formatDate(item.entered_at))}</strong><div class="cell-sub">${esc(item.entry_state || item.entry_note || 'Giacenza GLS')}</div></td>
+      <td><div class="activity-box ${item.handled ? '' : 'muted-box'}"><div class="activity-label">${esc(actionText)}</div>${actionBy ? `<div class="activity-meta">${esc(actionBy)} · ${esc(formatDate(actionAt))}</div>` : ''}${glsResult ? `<div class="activity-meta">${esc(glsResult)}</div>` : ''}</div></td>
+      <td><strong>${esc(item.outcome_label || '—')}</strong><div class="cell-sub">${esc(item.outcome_state || item.gls_status || '')}</div>${item.outcome_event_at ? `<div class="cell-sub">${esc(formatDate(item.outcome_event_at))}</div>` : item.exited_at ? `<div class="cell-sub">uscita ${esc(formatDate(item.exited_at))}</div>` : ''}</td>
+      <td><button class="btn small secondary open-stock" data-tracking="${esc(item.tracking_number)}">Apri</button></td>
+    </tr>`;
+  }).join('');
+  empty.classList.toggle('hidden', rows.length > 0);
+  $$('.open-stock').forEach(btn => btn.addEventListener('click', () => openDrawer(btn.dataset.tracking)));
+}
+
+async function loadDashboard({quiet = false} = {}) {
+  try {
+    const data = await api('/api/dashboard?include_closed=true');
+    state.data = data;
+    await loadInconsistencies({quiet:true});
+    renderKpis();
+    renderConnection();
+    renderTable();
+    if (data.sync_running) startSyncPolling();
+  } catch (err) {
+    if (!quiet) showNotice(`Errore caricamento dashboard: ${err.message}`);
+  }
+}
+
+function renderConnection() {
+  const cfg = state.data?.config || {};
+  const badge = $('#connectionBadge');
+  if (cfg.mock_mode) {
+    badge.innerHTML = '<span class="status-dot"></span> Modalità demo';
+    badge.className = 'status-chip neutral';
+  } else if (cfg.shopify_configured && cfg.gls_tracking_configured) {
+    if (state.data?.sync_running) {
+      badge.innerHTML = '<span class="status-dot"></span> Sincronizzazione';
+      badge.className = 'status-chip running';
+    } else {
+      badge.innerHTML = '<span class="status-dot"></span> Shopify + GLS online';
+      badge.className = 'status-chip ok';
+    }
+  } else {
+    badge.innerHTML = '<span class="status-dot"></span> Configurazione incompleta';
+    badge.className = 'status-chip neutral';
+  }
+
+  const missing = [];
+  if (!cfg.mock_mode && !cfg.shopify_configured) missing.push('Shopify');
+  if (!cfg.mock_mode && !cfg.gls_tracking_configured) missing.push('GLS');
+  const technicalErrors = Number(state.data?.last_sync?.gls_errors || 0);
+  if (missing.length) {
+    showNotice(`Configurazione mancante: ${missing.join(' e ')}.`);
+  } else if (technicalErrors > 0 && !state.data?.sync_running) {
+    showTechnicalNotice(state.data?.last_sync || {});
+  } else {
+    hideNotice();
+  }
+}
+
+function renderKpis() {
+  const rows = applyDateFilter([...(state.data?.shipments || [])]);
+  const actionable = rows.filter(x => ((x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)) || (!x.closed && ['CRITICAL','WARNING'].includes(x.effective_severity || x.severity) && x.workflow_status === 'NEW')));
+  const watch = rows.filter(x => !x.closed && (x.effective_severity || x.severity) === 'WATCH').length;
+  const working = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status)).length;
+  const delivered = rows.filter(x => x.category === 'DELIVERED').length;
+  const returned = rows.filter(x => x.category === 'RETURN').length;
+  const incons = rows.filter(x => x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)).length;
+  $('#kpiVerify').textContent = actionable.length;
+  $('#kpiWatch').textContent = watch;
+  $('#kpiWorking').textContent = working;
+  $('#kpiInconsistencies').textContent = incons;
+  $('#tabActionCount').textContent = actionable.length;
+  $('#tabWorkingCount').textContent = working;
+  $('#tabDeliveredCount').textContent = delivered;
+  $('#tabReturnedCount').textContent = returned;
+  $('#tabInconsistencyCount').textContent = incons;
+}
+
+function filteredShipments() {
+  let rows = applyDateFilter([...(state.data?.shipments || [])]);
+  if (state.view === 'action') rows = rows.filter(x => ((x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)) || (!x.closed && x.workflow_status === 'NEW' && ['CRITICAL','WARNING'].includes(x.effective_severity || x.severity))));
+  if (state.view === 'working') rows = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status));
+  if (state.view === 'active') rows = rows.filter(x => !x.closed);
+  if (state.view === 'delivered') rows = rows.filter(x => x.category === 'DELIVERED');
+  if (state.view === 'returned') rows = rows.filter(x => x.category === 'RETURN');
+  if (state.view === 'unknown') rows = rows.filter(x => !x.closed && x.category === 'UNCLASSIFIED');
+  if (state.severity) rows = rows.filter(x => (x.effective_severity || x.severity) === state.severity);
+  if (state.workflow) rows = rows.filter(x => x.workflow_status === state.workflow);
+  if (state.codOnly) rows = rows.filter(x => x.is_cod);
+  if (state.search) {
+    const q = state.search.toLowerCase();
+    rows = rows.filter(x => [
+      x.order_name, x.customer_name, x.customer_email, x.customer_phone, x.tracking_number,
+      x.gls_status, x.gls_note, x.gls_code, x.city, x.gls_destination_city,
+      x.last_operator_action, x.last_operator_name, x.inconsistency_titles
+    ].some(v => String(v || '').toLowerCase().includes(q)));
+  }
+  rows = sortRows(rows, state.sortKey, state.sortDir, (key,a,b) => {
+    const map = {
+      priority:[priorityRank(a),priorityRank(b),'number'],
+      order:[orderNumeric(a.order_name),orderNumeric(b.order_name),'number'],
+      customer:[a.customer_name,b.customer_name,'text'],
+      status:[a.gls_status || a.gls_note,b.gls_status || b.gls_note,'text'],
+      updated:[a.gls_event_at,b.gls_event_at,'date'],
+      workflow:[workflowLabels[a.workflow_status] || a.workflow_status,workflowLabels[b.workflow_status] || b.workflow_status,'text'],
+    };
+    return map[key] || map.priority;
+  });
+  return rows;
+}
+
+function renderTable() {
+  if (['rules','stocks','inconsistencies'].includes(state.view)) return;
+  const rows = filteredShipments();
+  const body = $('#shipmentsBody');
+  const empty = $('#emptyState');
+  const titles = {
+    action: 'Spedizioni da verificare', working: 'Pratiche in lavorazione', active: 'Tutte le spedizioni GLS attive',
+    delivered: 'Consegnati al cliente · chiusi', returned: 'Rientrati al mittente · chiusi', unknown: 'Nuovi stati GLS'
+  };
+  $('#tableTitle').textContent = titles[state.view] || 'Spedizioni GLS';
+  const total = (state.data?.shipments || []).filter(x => !x.closed).length;
+  $('#tableMeta').textContent = `${rows.length} nella vista corrente · ${total} GLS attive monitorate`;
+  const last = state.data?.last_sync;
+  if (last?.finished_at) {
+    const skipped = Number(last.skipped_closed || 0);
+    $('#lastSync').textContent = `Ultimo sync ${formatDate(last.finished_at)}${skipped ? ` · ${skipped} finali escluse` : ''}`;
+  } else { $('#lastSync').textContent = 'Mai aggiornato'; }
+  updateSortIndicators('.sort-head:not(.stock-sort):not(.inc-sort)', state.sortKey, state.sortDir);
+
+  body.innerHTML = rows.map(row => {
+    const current = row.gls_status || 'Stato GLS non disponibile';
+    const note = row.gls_note || '';
+    const hasAction = Boolean(row.last_operator_action);
+    const sev = row.effective_severity || row.severity;
+    const activity = hasAction
+      ? `<div class="activity-box"><div class="activity-label">${esc(row.last_operator_action)}</div><div class="activity-meta">${esc(row.last_operator_name || 'Operatore')} · ${esc(age(row.last_operator_action_at))}</div></div>`
+      : `<div class="no-activity">Nessuna azione registrata</div>`;
+    const location = [row.city, row.province].filter(Boolean).join(' · ') || '—';
+    const issueBadge = row.has_inconsistency ? `<div class="inconsistency-mini">⚠ ${row.inconsistency_count} incongruenza${row.inconsistency_count===1?'':'e'}</div>` : '';
+    return `
+      <tr class="shipment-row ${esc(sev)} ${hasAction ? 'has-action' : ''} ${row.has_inconsistency ? 'has-inconsistency' : ''}">
+        <td><span class="priority-pill ${esc(sev)}">${esc(severityLabels[sev] || sev)}</span>${issueBadge}</td>
+        <td><div class="order-main">${esc(row.order_name || '—')}</div><div class="cell-sub">${esc(formatDate(row.order_created_at, false))} · ${esc(formatMoney(row.total_amount, row.currency))}${row.is_cod ? ' · COD' : ''}</div><div class="tracking-code">${esc(row.tracking_number)}</div></td>
+        <td><div class="customer-main">${esc(row.customer_name || 'Cliente non disponibile')}</div><div class="cell-sub">${esc(location)}</div></td>
+        <td><div class="event-title">${esc(current)}</div>${note ? `<div class="event-note" title="${esc(note)}">${esc(note)}</div>` : ''}${row.has_inconsistency ? `<div class="cell-alert">${esc(row.inconsistency_titles || '')}</div>` : ''}</td>
+        <td><div>${esc(age(row.gls_event_at))}</div><div class="cell-sub">${esc(formatDate(row.gls_event_at))}</div></td>
+        <td><span class="workflow-pill ${esc(row.workflow_status)}">${esc(workflowLabels[row.workflow_status] || row.workflow_status)}</span>${activity}</td>
+        <td><button class="row-btn" data-open="${esc(row.tracking_number)}">Gestisci →</button></td>
+      </tr>`;
+  }).join('');
+  empty.classList.toggle('hidden', rows.length !== 0);
+  $$('[data-open]').forEach(btn => btn.addEventListener('click', () => openDrawer(btn.dataset.open)));
+}
+
+async function loadInconsistencies({quiet=false} = {}) {
+  try {
+    const data = await api('/api/inconsistencies');
+    state.inconsistencyData = data.items || [];
+    renderInconsistencies();
+  } catch (err) {
+    if (!quiet) showToast(`Incongruenze non disponibili: ${err.message}`, true);
+  }
+}
+
+function renderInconsistencies() {
+  const panel = $('#inconsistencyBody');
+  if (!panel) return;
+  let rows = [...(state.inconsistencyData || [])];
+  rows = sortRows(rows, state.inconsistencySortKey, state.inconsistencySortDir, (key,a,b) => {
+    const map = {
+      priority:[0,0,'number'],
+      order:[orderNumeric(a.order_name),orderNumeric(b.order_name),'number'],
+      customer:[a.customer_name,b.customer_name,'text'],
+      issue:[a.title,b.title,'text'],
+      detected:[a.detected_at,b.detected_at,'date'],
+    };
+    return map[key] || map.detected;
+  });
+  updateSortIndicators('.inc-sort', state.inconsistencySortKey, state.inconsistencySortDir);
+  $('#inconsistencyMeta').textContent = `${rows.length} incongruenze attive · tutte hanno priorità massima`;
+  panel.innerHTML = rows.map(x => `<tr class="shipment-row CRITICAL has-inconsistency">
+    <td><span class="priority-pill CRITICAL">MASSIMA</span></td>
+    <td><div class="order-main">${esc(x.order_name || '—')}</div><div class="tracking-code">${esc(x.tracking_number)}</div></td>
+    <td><div class="customer-main">${esc(x.customer_name || '—')}</div><div class="cell-sub">${esc(x.customer_phone || '')}</div></td>
+    <td><div class="event-title">${esc(x.title || x.issue_code)}</div><div class="event-note always-wrap">${esc(x.detail || '')}</div><div class="cell-alert">${esc(x.suggested_action || '')}</div></td>
+    <td><strong>${esc(formatDate(x.detected_at))}</strong><div class="cell-sub">${esc(x.gls_status || '')}</div></td>
+    <td><button class="row-btn" data-open-inc="${esc(x.tracking_number)}">Gestisci →</button></td>
+  </tr>`).join('');
+  $('#inconsistencyEmpty').classList.toggle('hidden', rows.length !== 0);
+  $$('[data-open-inc]').forEach(btn => btn.addEventListener('click', () => openDrawer(btn.dataset.openInc)));
+}
+
+async function openDrawer(tracking) {
+  state.selectedTracking = tracking;
+  try {
+    const item = await api(`/api/shipment/${encodeURIComponent(tracking)}`);
+    $('#drawerOrder').textContent = item.order_name || 'SPEDIZIONE GLS';
+    $('#drawerTitle').textContent = item.customer_name || item.tracking_number;
+    $('#drawerContent').innerHTML = drawerHtml(item);
+    $('#drawerBackdrop').classList.remove('hidden');
+    $('#drawer').classList.add('open');
+    $('#drawer').setAttribute('aria-hidden', 'false');
+    bindDrawer(item);
+  } catch (err) { showToast(err.message, true); }
+}
+
+function closeDrawer() {
+  $('#drawerBackdrop').classList.add('hidden');
+  $('#drawer').classList.remove('open');
+  $('#drawer').setAttribute('aria-hidden', 'true');
+  state.selectedTracking = null;
+}
+
+function drawerHtml(item) {
+  const events = item.events || [];
+  const actions = item.operator_actions || [];
+  const links = item.links || {};
+  const issues = (item.inconsistencies || []).filter(x => Number(x.active || 0) === 1);
+  const eventCode = item.gls_code || '';
+  const sev = item.effective_severity || item.severity;
+  const contactPhone = item.customer_phone ? `<a href="tel:${esc(item.customer_phone)}">${esc(item.customer_phone)}</a>` : '—';
+  const contactEmail = item.customer_email ? `<a href="mailto:${esc(item.customer_email)}">${esc(item.customer_email)}</a>` : '—';
+  const glsPhone = item.gls_destination_phone ? `<a href="tel:${esc(item.gls_destination_phone)}">${esc(item.gls_destination_phone)}</a>` : '—';
+  const spokiPhone = phoneDigits(item.customer_phone || '');
+  const spokiUrl = spokiPhone ? `https://app.spoki.com/contacts?search=${encodeURIComponent(spokiPhone)}` : '';
+
+  const internalBanner = item.last_operator_action ? `
+    <div class="internal-banner"><div class="icon">✓</div><div><strong>Intervento già registrato: ${esc(item.last_operator_action)}</strong><span>${esc(item.last_operator_name || 'Operatore')} · ${esc(formatDate(item.last_operator_action_at))}. Lo stato GLS può restare invariato finché la sede non recepisce l'operazione.</span></div></div>` : '';
+
+  const issueBox = issues.length ? `
+    <div class="inconsistency-banner">
+      <div class="section-title-row"><h3>⚠ Incongruenze rilevate</h3><span>PRIORITÀ MASSIMA</span></div>
+      ${issues.map(i => `<div class="issue-card"><strong>${esc(i.title)}</strong><p>${esc(i.detail || '')}</p><em>${esc(i.suggested_action || '')}</em></div>`).join('')}
+    </div>` : '';
+
+  const classificationBox = eventCode ? `
+    <div class="section-box"><div class="classify-box"><strong>Classifica codice GLS ${esc(eventCode)}</strong><div class="muted">Questa scelta avrà precedenza sulle regole testuali.</div><div class="classify-grid"><select id="classSeverity">${['NORMAL','INFO','WATCH','WARNING','CRITICAL'].map(s => `<option value="${s}" ${s===item.severity?'selected':''}>${esc(severityLabels[s] || s)}</option>`).join('')}</select><input id="classCategory" value="${esc(item.category || 'UNCLASSIFIED')}" placeholder="Categoria, es. ADDRESS_ERROR"></div><div class="link-row"><button id="saveClassBtn" class="btn secondary">Salva classificazione</button></div></div></div>` : '';
+
+  const stockCases = item.stock_cases || [];
+  const latestStock = stockCases[0] || null;
+  const hasOpenStock = Boolean(latestStock && latestStock.status === 'OPEN') || item.category === 'STORAGE';
+  const stockHistoryBox = stockCases.length ? `
+    <div class="section-box stock-history-box"><div class="section-title-row"><h3>Storico giacenze</h3><span>${stockCases.length} ${stockCases.length===1?'episodio':'episodi'}</span></div><div class="stock-case-list">
+      ${stockCases.map(sc => {
+        const releases = sc.release_requests || [];
+        const lastRelease = releases[0];
+        const outcome = sc.status === 'OPEN' ? 'Ancora in giacenza' : (sc.outcome_state || sc.outcome_category || 'Uscita dalla giacenza');
+        return `<div class="stock-case-card ${sc.status === 'OPEN' ? 'open' : 'closed'}"><div class="stock-case-head"><strong>Entrata ${esc(formatDate(sc.entered_at))}</strong><span>${sc.status === 'OPEN' ? 'APERTA' : 'CHIUSA'}</span></div><div class="stock-case-state">${esc(sc.entry_state || sc.entry_note || 'Spedizione in giacenza')}</div>${lastRelease ? `<div class="stock-instruction"><b>Istruzione inviata:</b> ${esc(lastRelease.release_label)} · ${esc(lastRelease.operator_name || 'Operatore')} · ${esc(formatDate(lastRelease.created_at))}<br><span>${lastRelease.gls_success ? 'Ricevuta da GLS' : 'Non accettata da GLS'}${lastRelease.gls_result ? ` · ${esc(lastRelease.gls_result)}` : ''}</span>${lastRelease.note ? `<br><em>${esc(lastRelease.note)}</em>` : ''}</div>` : '<div class="stock-instruction muted">Nessuna istruzione API registrata per questa giacenza.</div>'}<div class="stock-outcome-line"><b>Esito:</b> ${esc(outcome)}${sc.outcome_event_at ? ` · ${esc(formatDate(sc.outcome_event_at))}` : sc.exited_at ? ` · uscita ${esc(formatDate(sc.exited_at))}` : ''}</div></div>`;
+      }).join('')}
+    </div></div>` : '';
+
+  const releaseBox = hasOpenStock ? `
+    <div class="section-box release-box">
+      <div class="section-title-row"><h3>Gestisci giacenza via API GLS</h3><span>istruzione + risposta GLS restano nello storico</span></div>
+      <div class="release-warning">La richiesta viene registrata subito. Se il tracking resta fermo, il monitor confronterà automaticamente istruzione e movimenti GLS e segnalerà eventuali incongruenze.</div>
+      <div class="release-grid">
+        <label class="field-span-2">Istruzione<select id="releaseType"><option value="1">Ritenta consegna allo stesso indirizzo</option><option value="2">Consegna a un indirizzo diverso</option><option value="3">Ritorno al mittente</option><option value="7">Ritiro del destinatario presso la sede GLS</option><option value="8">Consegna parziale e rientro</option><option value="4">Distruzione</option><option value="9">Consegna parziale e distruzione</option></select></label>
+        <label>Data riconsegna <input id="releaseDate" type="date"></label>
+        <label id="expensePayerField">Spese riconsegna<select id="releaseExpensePayer"><option value="">Scegli…</option><option value="sender">A carico mittente</option><option value="recipient">A carico destinatario</option></select></label>
+        <label>Telefono destinatario <input id="releasePhone" type="tel" value="${esc(localItalianPhone(item.customer_phone || ''))}" maxlength="15"></label>
+        <label class="check-field"><input id="releasePhoneNotice" type="checkbox" checked> Preavviso telefonico</label>
+        ${item.is_cod ? `<label class="check-field"><input id="releaseCancelCod" type="checkbox"> Annulla contrassegno</label>` : ''}
+        <label class="field-span-2">Note GLS <textarea id="releaseNote" maxlength="65" placeholder="Massimo 65 caratteri"></textarea></label>
+        <div id="newAddressFields" class="new-address-fields hidden field-span-2"><label>Destinatario <input id="releaseNewName" maxlength="20"></label><label>Nuovo indirizzo <input id="releaseNewAddress" maxlength="30"></label><label>Località <input id="releaseNewCity" maxlength="30"></label><label>CAP <input id="releaseNewZip" maxlength="5"></label><label>Provincia <input id="releaseNewProvince" maxlength="3"></label></div>
+      </div>
+      <div class="release-actions"><button id="sendReleaseBtn" class="btn primary">Invia istruzione a GLS</button><button class="btn secondary quick-action-inline" data-action="STOCK_MANUAL_HANDLED">Registra gestione fatta fuori dal tool</button></div>
+    </div>` : '';
+
+  const combined = [
+    ...events.map(ev => ({when: ev.event_at || ev.created_at, source:'GLS', severity:ev.severity || 'WATCH', title:ev.state || 'Evento GLS', note:ev.note || '', meta:[ev.location, ev.code ? `codice ${ev.code}` : ''].filter(Boolean).join(' · ')})),
+    ...actions.map(a => ({when:a.created_at, source:'TEAM', severity:'TEAM', title:a.action_label || a.action_type, note:a.note || '', meta:a.operator_name || 'Operatore'})),
+  ].sort((a,b) => (new Date(b.when || 0).getTime()||0) - (new Date(a.when || 0).getTime()||0));
+
+  return `
+    <div class="status-card ${esc(sev)}"><span class="priority-pill ${esc(sev)}">${esc(severityLabels[sev] || sev)}</span><h3>${esc(item.gls_status || 'Stato GLS non disponibile')}</h3>${item.gls_note ? `<p>${esc(item.gls_note)}</p>` : ''}${item.reason ? `<p class="muted" style="margin-top:7px">${esc(item.reason)}</p>` : ''}</div>
+    ${issueBox}${internalBanner}
+
+    <div class="detail-grid">
+      <div class="detail-item"><label>Ordine Shopify</label><strong>${esc(item.order_name || '—')}</strong><div class="muted">${esc(formatMoney(item.total_amount, item.currency))} · ${esc(formatDate(item.order_created_at, false))}</div></div>
+      <div class="detail-item"><label>Pagamento</label><strong>${item.is_cod ? 'Contrassegno' : esc((item.payment_gateways || []).join(', ') || '—')}</strong><div class="muted">${esc(item.shopify_financial_status || '')}</div></div>
+      <div class="detail-item tracking-detail"><label>Tracking GLS</label><strong class="tracking-code tracking-code-large">${esc(item.tracking_number)}</strong><div class="muted">${eventCode ? `Codice ${esc(eventCode)}` : 'Codice evento non disponibile'}</div></div>
+      <div class="detail-item"><label>Ultimo evento GLS</label><strong>${esc(formatDate(item.gls_event_at))}</strong><div class="muted">${esc(item.gls_location || '')}</div></div>
+      <div class="detail-item"><label>Cliente</label><strong>${esc(item.customer_name || '—')}</strong><div>${contactPhone}</div><div>${contactEmail}</div></div>
+      <div class="detail-item"><label>Sede GLS destinataria</label><strong>${esc([item.gls_destination_depot, item.gls_destination_city].filter(Boolean).join(' · ') || '—')}</strong><div>${glsPhone}</div></div>
+    </div>
+
+    <div class="detail-item"><label>Azione consigliata</label><strong>${esc(item.recommended_action || 'Verificare lo stato e decidere l’intervento operativo.')}</strong></div>
+    <div class="link-row action-links">
+      ${spokiUrl ? `<a class="btn primary" target="_blank" rel="noopener" href="${esc(spokiUrl)}">Contatta cliente</a>` : ''}
+      ${item.gls_destination_phone ? `<a class="btn secondary" href="tel:${esc(item.gls_destination_phone)}">Chiama GLS</a>` : ''}
+      ${links.gls ? `<button id="openGlsIncognitoBtn" class="btn secondary" type="button">${state.data?.config?.native_incognito === false ? 'Tracking GLS' : 'Tracking GLS · Incognito'}</button>` : ''}
+      ${links.shopify ? `<a class="btn secondary" target="_blank" rel="noopener" href="${esc(links.shopify)}">Ordine Shopify</a>` : ''}
+      ${links.shopify_profile ? `<a class="btn secondary" target="_blank" rel="noopener" href="${esc(links.shopify_profile)}">Profilo Shopify</a>` : ''}
+    </div>
+
+    <div class="section-box"><div class="section-title-row"><h3>Registra intervento</h3><span>ogni azione entra nello storico unico</span></div><div class="quick-actions">
+      <button class="quick-action" data-action="CUSTOMER_MESSAGE"><span class="qa-icon">✉</span><span>Messaggio cliente</span></button>
+      <button class="quick-action" data-action="CUSTOMER_CALLED"><span class="qa-icon">☎</span><span>Cliente contattato</span></button>
+      <button class="quick-action" data-action="GLS_CONTACTED"><span class="qa-icon">G</span><span>GLS contattata</span></button>
+      <button class="quick-action primary-action" data-action="RELEASE_REQUESTED"><span class="qa-icon">✓</span><span>SVINCOLO Ritenta consegna</span></button>
+      <button class="quick-action" data-action="DELIVERY_RESCHEDULED"><span class="qa-icon">↩</span><span>SVINCOLO Ritorno al mittente</span></button>
+      <button class="quick-action" data-action="NOTE"><span class="qa-icon">＋</span><span>Registra nota</span></button>
+    </div><textarea id="quickActionNote" class="action-note" placeholder="Nota opzionale: es. cliente conferma indirizzo, contattata sede GLS…"></textarea></div>
+
+    ${releaseBox}${stockHistoryBox}
+
+    <div class="section-box"><div class="section-title-row"><h3>Stato pratica interno</h3><span>puoi lasciarla aperta oppure chiuderla manualmente</span></div><div class="workflow-buttons"><button class="workflow-btn ${item.workflow_status==='IN_PROGRESS'?'active':''}" data-workflow="IN_PROGRESS">IN LAVORAZIONE</button><button class="workflow-btn ${['RESOLVED','IGNORED'].includes(item.workflow_status)?'active':''}" data-workflow="RESOLVED">CHIUSA</button></div><textarea id="operatorNote" class="operator-note" placeholder="Nota pratica generale…">${esc(item.operator_note || '')}</textarea><div class="link-row"><button id="saveWorkflowBtn" class="btn primary">Salva pratica</button></div></div>
+
+    <div class="section-box"><div class="section-title-row"><h3>Storico completo</h3><span>GLS + attività operatori · ${combined.length} eventi</span></div><div class="timeline combined-timeline">
+      ${combined.length ? combined.map(e => `<div class="timeline-item ${e.source==='TEAM'?'team':esc(e.severity)}"><div class="timeline-time"><span class="source-badge ${e.source==='TEAM'?'team':'gls'}">${e.source}</span> ${esc(formatDate(e.when))}${e.meta ? ` · ${esc(e.meta)}` : ''}</div><div class="timeline-state">${esc(e.title)}</div>${e.note ? `<div class="timeline-note">${esc(e.note)}</div>` : ''}</div>`).join('') : '<div class="muted">Nessuno storico disponibile.</div>'}
+    </div></div>
+    ${classificationBox}`;
+}
+
+function bindDrawer(item) {
+  let workflow = item.workflow_status || 'NEW';
+  $$('[data-workflow]').forEach(btn => btn.addEventListener('click', () => {
+    workflow = btn.dataset.workflow;
+    $$('[data-workflow]').forEach(x => x.classList.toggle('active', x === btn));
+  }));
+
+  $('#openGlsIncognitoBtn')?.addEventListener('click', async () => {
+    // L'apertura in incognito la pilota il backend, possibile solo sul Mac locale.
+    // Online si apre una scheda normale sulla pagina ufficiale GLS.
+    if (state.data?.config?.native_incognito === false) {
+      const url = item.links?.gls;
+      if (url) window.open(url, '_blank', 'noopener');
+      return;
+    }
+    try {
+      await api('/api/open-incognito', {method:'POST', body:JSON.stringify({tracking:item.tracking_number})});
+      showToast('Tracking GLS aperto in Chrome Incognito');
+    } catch (err) { showToast(err.message, true); }
+  });
+
+  $$('[data-action]').forEach(btn => btn.addEventListener('click', async () => {
+    const operatorName = getOperatorName(true);
+    if (!operatorName) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/shipment/${encodeURIComponent(item.tracking_number)}/action`, {
+        method: 'POST',
+        body: JSON.stringify({
+          action_type: btn.dataset.action,
+          note: $('#quickActionNote')?.value || '',
+          operator_name: operatorName,
+        })
+      });
+      showToast('Intervento registrato');
+      await loadDashboard({quiet:true});
+      await openDrawer(item.tracking_number);
+    } catch (err) {
+      showToast(err.message, true);
+      btn.disabled = false;
+    }
+  }));
+
+  const releaseType = $('#releaseType');
+  if (releaseType) {
+    const toggleReleaseFields = () => {
+      $('#newAddressFields')?.classList.toggle('hidden', releaseType.value !== '2');
+      $('#expensePayerField')?.classList.toggle('hidden', !['1','2'].includes(releaseType.value));
+    };
+    releaseType.addEventListener('change', toggleReleaseFields);
+    toggleReleaseFields();
+  }
+
+  $('#sendReleaseBtn')?.addEventListener('click', async () => {
+    const operatorName = getOperatorName(true);
+    if (!operatorName) return;
+    const type = $('#releaseType')?.value || '';
+    const label = $('#releaseType')?.selectedOptions?.[0]?.textContent || 'istruzione GLS';
+    const destructive = ['4','9'].includes(type);
+    const question = destructive
+      ? `ATTENZIONE: stai per inviare a GLS “${label}”. Confermi?`
+      : `Inviare a GLS l'istruzione “${label}” per ${item.tracking_number}?`;
+    if (!window.confirm(question)) return;
+    const btn = $('#sendReleaseBtn');
+    btn.disabled = true;
+    btn.textContent = 'Invio a GLS…';
+    try {
+      const payload = {
+        operator_name: operatorName,
+        release_type: type,
+        delivery_date: $('#releaseDate')?.value || '',
+        expense_payer: $('#releaseExpensePayer')?.value || '',
+        recipient_phone: $('#releasePhone')?.value || '',
+        customer_phone: item.customer_phone || '',
+        phone_notice: Boolean($('#releasePhoneNotice')?.checked),
+        cancel_cod: Boolean($('#releaseCancelCod')?.checked),
+        note: $('#releaseNote')?.value || '',
+        new_name: $('#releaseNewName')?.value || '',
+        new_address: $('#releaseNewAddress')?.value || '',
+        new_city: $('#releaseNewCity')?.value || '',
+        new_zip: $('#releaseNewZip')?.value || '',
+        new_province: $('#releaseNewProvince')?.value || '',
+      };
+      const res = await api(`/api/shipment/${encodeURIComponent(item.tracking_number)}/release-stock`, {
+        method:'POST', body:JSON.stringify(payload)
+      });
+      showToast(`GLS: ${res.message || 'istruzione accettata'}`);
+      await loadDashboard({quiet:true});
+      await loadStockHistory({quiet:true});
+      await openDrawer(item.tracking_number);
+    } catch (err) {
+      showToast(`Svincolo non confermato: ${err.message}`, true);
+      btn.disabled = false;
+      btn.textContent = 'Invia istruzione a GLS';
+    }
+  });
+
+  $('#saveWorkflowBtn')?.addEventListener('click', async () => {
+    const operatorName = getOperatorName(true);
+    if (!operatorName) return;
+    try {
+      await api(`/api/shipment/${encodeURIComponent(item.tracking_number)}/workflow`, {
+        method:'POST',
+        body:JSON.stringify({
+          workflow_status: workflow,
+          operator_note: $('#operatorNote').value,
+          operator_name: operatorName,
+        })
+      });
+      showToast('Pratica aggiornata');
+      await loadDashboard({quiet:true});
+      await openDrawer(item.tracking_number);
+    } catch (err) { showToast(err.message, true); }
+  });
+
+  $('#saveClassBtn')?.addEventListener('click', async () => {
+    try {
+      await api('/api/classification', { method:'POST', body:JSON.stringify({
+        event_code: item.gls_code,
+        severity: $('#classSeverity').value,
+        category: $('#classCategory').value.trim().toUpperCase(),
+        recommended_action: item.recommended_action || ''
+      })});
+      showToast('Codice GLS classificato. Verrà applicato al prossimo aggiornamento.');
+    } catch (err) { showToast(err.message, true); }
+  });
+}
+
+function renderSyncProgress(p) {
+  const panel = $('#syncPanel');
+  const bar = $('#syncProgressBar');
+  const spinner = $('#syncSpinner');
+  if (!p || (!p.running && !['DONE','ERROR'].includes(p.phase))) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  $('#syncLabel').textContent = p.label || 'Sincronizzazione…';
+  const total = Number(p.total || 0);
+  const processed = Number(p.processed || 0);
+  const percent = Number(p.percent || 0);
+  $('#syncProcessed').textContent = total ? `${processed} / ${total} spedizioni GLS` : 'Preparazione dati…';
+  const syncBits = [`${Number(p.success || 0)} aggiornate`];
+  if (Number(p.pending_pickup || 0)) syncBits.push(`${Number(p.pending_pickup || 0)} in attesa ritiro`);
+  if (Number(p.no_event_attention || 0)) syncBits.push(`${Number(p.no_event_attention || 0)} da verificare senza eventi`);
+  if (Number(p.errors || 0)) syncBits.push(`${Number(p.errors || 0)} errori tecnici`);
+  $('#syncResults').textContent = syncBits.join(' · ');
+  $('#syncDetail').textContent = p.phase === 'SHOPIFY' ? 'Connessione Shopify' : p.phase === 'FILTERING' ? 'Filtro solo corriere GLS' : p.current_tracking ? `Tracking ${p.current_tracking}` : p.phase === 'DONE' ? 'Dati aggiornati' : p.phase === 'ERROR' ? 'Controlla diagnostica' : 'Interrogazione GLS';
+  $('#syncPercent').textContent = total ? `${Math.min(100, percent)}%` : '…';
+  $('#syncEta').textContent = p.running ? formatEta(p.eta_seconds) : (p.phase === 'DONE' ? 'Completato' : 'Interrotto');
+  bar.classList.toggle('indeterminate', p.running && !total);
+  bar.style.width = total ? `${Math.min(100, percent)}%` : '';
+  spinner.classList.toggle('done', !p.running && p.phase === 'DONE');
+
+  const btn = $('#syncBtn');
+  btn.disabled = Boolean(p.running);
+  btn.innerHTML = p.running ? '<span class="btn-icon">↻</span> Aggiornamento…' : '<span class="btn-icon">↻</span> Aggiorna';
+}
+
+async function pollSyncProgress() {
+  try {
+    const p = await api('/api/sync/progress');
+    renderSyncProgress(p);
+    if (p.running) return true;
+    await loadDashboard({quiet:true});
+    await loadStockHistory({quiet:true});
+    if (p.phase === 'DONE') setTimeout(() => $('#syncPanel').classList.add('hidden'), 4500);
+    return false;
+  } catch (err) {
+    showToast(`Stato sincronizzazione non disponibile: ${err.message}`, true);
+    return false;
+  }
+}
+
+function startSyncPolling() {
+  if (state.syncTimer) return;
+  const tick = async () => {
+    const keepGoing = await pollSyncProgress();
+    if (!keepGoing) {
+      clearInterval(state.syncTimer);
+      state.syncTimer = null;
+    }
+  };
+  tick();
+  state.syncTimer = setInterval(tick, 800);
+}
+
+async function syncNow() {
+  const btn = $('#syncBtn');
+  btn.disabled = true;
+  try {
+    const res = await api('/api/sync', { method:'POST', body:'{}' });
+    if (res && res.done) {
+      // Deploy serverless: la sincronizzazione e' gia' conclusa quando risponde.
+      showToast('Sincronizzazione completata');
+      await loadDashboard({quiet:true});
+      await loadStockHistory({quiet:true});
+      btn.disabled = false;
+      return;
+    }
+    showToast('Sincronizzazione avviata');
+    startSyncPolling();
+  } catch (err) {
+    btn.disabled = false;
+    showToast(err.message, true);
+  }
+}
+
+async function diagnostics() {
+  const btn = $('#diagnosticsBtn');
+  btn.disabled = true; btn.textContent = 'Test…';
+  try {
+    const d = await api('/api/diagnostics');
+    const lines = [
+      `Shopify: ${d.shopify.auth_ok === true ? 'OK' : d.shopify.configured ? 'configurato, test non riuscito' : 'non configurato'}`,
+      `GLS: ${d.gls.list_sped_ok === true ? 'OK' : d.gls.list_configured ? 'configurato, test non riuscito' : 'non configurato'}`,
+    ];
+    if (d.shopify.error) lines.push(`Shopify: ${d.shopify.error}`);
+    if (d.gls.list_sped_error || d.gls.error) lines.push(`GLS: ${d.gls.list_sped_error || d.gls.error}`);
+    const last = state.data?.last_sync;
+    if (Number(last?.pending_pickup || 0) > 0) lines.push('', `${last.pending_pickup} tracking in attesa fisiologica di ritiro/presa in carico GLS.`);
+    if (Number(last?.no_event_attention || 0) > 0) lines.push(`${last.no_event_attention} tracking senza eventi oltre la finestra prevista: sono in DA VERIFICARE.`);
+    if (Number(last?.gls_errors || 0) > 0) {
+      lines.push('', `Ultima sincronizzazione: ${last.gls_errors} errori tecnici reali`);
+      (last.error_summary || []).forEach(g => lines.push(`- ${g.count} × ${g.error_title}: ${g.resolution_hint}`));
+    }
+    alert(lines.join('\n'));
+  } catch (err) { showToast(err.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'Diagnostica'; }
+}
+
+async function renderRules() {
+  $('#shipmentsPanel').classList.add('hidden');
+  $('#stockPanel').classList.add('hidden');
+  $('#inconsistencyPanel').classList.add('hidden');
+  $('#rulesPanel').classList.remove('hidden');
+  $('#filters').classList.add('hidden');
+  try {
+    const data = await api('/api/rules');
+    $('#rulesContent').innerHTML = (data.rules || []).map(rule => `
+      <div class="rule-row">
+        <div><span class="priority-pill ${esc(rule.severity)}">${esc(severityLabels[rule.severity] || rule.severity)}</span></div>
+        <div><strong>${esc(rule.category)}</strong><br><code>${esc(rule.id)}</code></div>
+        <div><strong>Riconosce</strong><br><span class="muted">${esc((rule.patterns || []).join(' · '))}</span></div>
+        <div><strong>Azione</strong><br><span class="muted">${esc(rule.action || '')}</span></div>
+      </div>`).join('') + (data.overrides?.length ? `
+        <div class="rule-row"><div><strong>Override codici</strong></div><div></div><div>${data.overrides.map(x => `<code>${esc(x.event_code)} → ${esc(x.severity)} / ${esc(x.category)}</code>`).join('<br>')}</div><div>Creati dalla dashboard.</div></div>` : '');
+  } catch (err) { showToast(err.message, true); }
+}
+
+function switchView(view) {
+  state.view = view;
+  $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  $('#rulesPanel').classList.add('hidden');
+  $('#stockPanel').classList.add('hidden');
+  $('#inconsistencyPanel').classList.add('hidden');
+  $('#shipmentsPanel').classList.add('hidden');
+  $('#filters').classList.add('hidden');
+  if (view === 'rules') return renderRules();
+  if (view === 'stocks') { $('#stockPanel').classList.remove('hidden'); loadStockHistory({quiet:true}); return; }
+  if (view === 'inconsistencies') { $('#inconsistencyPanel').classList.remove('hidden'); loadInconsistencies({quiet:true}); return; }
+  $('#shipmentsPanel').classList.remove('hidden');
+  $('#filters').classList.remove('hidden');
+  renderTable();
+}
+
+function setQuickDate(days) {
+  const today = new Date();
+  state.dateTo = dateKeyFromDate(today);
+  if (days === 0) state.dateFrom = state.dateTo;
+  else {
+    const from = new Date(today);
+    from.setDate(today.getDate() - (days - 1));
+    state.dateFrom = dateKeyFromDate(from);
+  }
+  $('#dateFrom').value = state.dateFrom;
+  $('#dateTo').value = state.dateTo;
+  $$('.quick-dates button').forEach(b => b.classList.toggle('active', Number(b.dataset.days) === days));
+  renderKpis(); renderTable();
+}
+
+function resetFilters() {
+  state.severity = ''; state.workflow = ''; state.codOnly = false; state.search = ''; state.dateFrom = ''; state.dateTo = '';
+  $('#searchInput').value = ''; $('#severityFilter').value = ''; $('#workflowFilter').value = ''; $('#codOnly').checked = false;
+  $('#dateFrom').value = ''; $('#dateTo').value = '';
+  $$('.quick-dates button').forEach(b => b.classList.remove('active'));
+  renderKpis(); renderTable();
+}
+
+function bind() {
+  const savedOperator = localStorage.getItem('glsMonitorOperator') || '';
+  $('#operatorInput').value = savedOperator;
+  $('#operatorInput').addEventListener('input', e => localStorage.setItem('glsMonitorOperator', e.target.value.trim()));
+  $('#syncBtn').addEventListener('click', syncNow);
+  $('#diagnosticsBtn').addEventListener('click', diagnostics);
+  $('#drawerClose').addEventListener('click', closeDrawer);
+  $('#drawerBackdrop').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+  $$('.tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+  $$('.metric-card').forEach(k => k.addEventListener('click', () => {
+    if (k.dataset.viewTarget) switchView(k.dataset.viewTarget);
+    else switchView(k.dataset.category ? 'unknown' : 'active');
+    if (k.dataset.severity) { state.severity = k.dataset.severity; $('#severityFilter').value = state.severity; }
+    renderTable();
+  }));
+  $('#searchInput').addEventListener('input', e => { state.search = e.target.value.trim(); renderTable(); });
+  $('#severityFilter').addEventListener('change', e => { state.severity = e.target.value; renderTable(); });
+  $('#workflowFilter').addEventListener('change', e => { state.workflow = e.target.value; renderTable(); });
+  $('#codOnly').addEventListener('change', e => { state.codOnly = e.target.checked; renderTable(); });
+  $('#dateFrom').addEventListener('change', e => {
+    state.dateFrom = e.target.value || '';
+    if (state.dateTo && state.dateFrom > state.dateTo) { state.dateTo = state.dateFrom; $('#dateTo').value = state.dateTo; }
+    $$('.quick-dates button').forEach(b => b.classList.remove('active'));
+    renderKpis(); renderTable();
+  });
+  $('#dateTo').addEventListener('change', e => {
+    state.dateTo = e.target.value || '';
+    if (state.dateFrom && state.dateTo < state.dateFrom) { state.dateFrom = state.dateTo; $('#dateFrom').value = state.dateFrom; }
+    $$('.quick-dates button').forEach(b => b.classList.remove('active'));
+    renderKpis(); renderTable();
+  });
+  $$('.quick-dates button').forEach(btn => btn.addEventListener('click', () => setQuickDate(Number(btn.dataset.days))));
+  $('#resetFilters').addEventListener('click', resetFilters);
+  $$('.sort-head:not(.stock-sort):not(.inc-sort)').forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.dataset.sort;
+    if (state.sortKey === key) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+    else { state.sortKey = key; state.sortDir = key === 'customer' || key === 'status' || key === 'workflow' ? 'asc' : 'desc'; }
+    renderTable();
+  }));
+  $$('.stock-sort').forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.dataset.sort;
+    if (state.stockSortKey === key) state.stockSortDir = state.stockSortDir === 'asc' ? 'desc' : 'asc';
+    else { state.stockSortKey = key; state.stockSortDir = key === 'customer' || key === 'activity' || key === 'current' ? 'asc' : 'desc'; }
+    renderStockHistory();
+  }));
+  $$('.inc-sort').forEach(btn => btn.addEventListener('click', () => {
+    const key = btn.dataset.sort;
+    if (state.inconsistencySortKey === key) state.inconsistencySortDir = state.inconsistencySortDir === 'asc' ? 'desc' : 'asc';
+    else { state.inconsistencySortKey = key; state.inconsistencySortDir = key === 'customer' || key === 'issue' ? 'asc' : 'desc'; }
+    renderInconsistencies();
+  }));
+  $('#stockSearch').addEventListener('input', e => { state.stockSearch = e.target.value.trim(); renderStockHistory(); });
+  $('#stockOutcomeFilter').addEventListener('change', e => { state.stockOutcome = e.target.value; renderStockHistory(); });
+  $('#stockHandledFilter').addEventListener('change', e => { state.stockHandled = e.target.value; renderStockHistory(); });
+  $('#stockDateFrom').addEventListener('change', e => { state.stockDateFrom = e.target.value || ''; renderStockHistory(); });
+  $('#stockDateTo').addEventListener('change', e => { state.stockDateTo = e.target.value || ''; renderStockHistory(); });
+  $('#stockReset').addEventListener('click', () => {
+    state.stockSearch=''; state.stockOutcome=''; state.stockHandled=''; state.stockDateFrom=''; state.stockDateTo='';
+    $('#stockSearch').value=''; $('#stockOutcomeFilter').value=''; $('#stockHandledFilter').value=''; $('#stockDateFrom').value=''; $('#stockDateTo').value='';
+    renderStockHistory();
+  });
+}
+
+bind();
+loadDashboard();
+loadStockHistory({quiet:true});
+pollSyncProgress();
+setInterval(() => { loadDashboard({quiet:true}); loadStockHistory({quiet:true}); }, 30000);

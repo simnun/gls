@@ -1,0 +1,239 @@
+{
+  "version": 2,
+  "severity_order": [
+    "NORMAL",
+    "INFO",
+    "WATCH",
+    "WARNING",
+    "CRITICAL"
+  ],
+  "rules": [
+    {
+      "id": "delivered",
+      "severity": "NORMAL",
+      "category": "DELIVERED",
+      "patterns": [
+        "consegnata",
+        "consegnato"
+      ],
+      "action": "Nessuna azione. Consegnata al destinatario: pratica chiusa.",
+      "exclude_patterns": [
+        "mittente",
+        "rientro",
+        "restituzione",
+        "reso al mittente",
+        "ritorno al mittente"
+      ]
+    },
+    {
+      "id": "out_for_delivery",
+      "severity": "NORMAL",
+      "category": "OUT_FOR_DELIVERY",
+      "patterns": [
+        "consegna prevista nel corso della giornata",
+        "in consegna"
+      ],
+      "action": "Nessuna azione."
+    },
+    {
+      "id": "next_business_day",
+      "severity": "NORMAL",
+      "category": "SCHEDULED",
+      "patterns": [
+        "consegna prevista per il giorno lavorativo successivo",
+        "primo giorno lavorativo disponibile"
+      ],
+      "exclude_patterns": [
+        "contrassegno non disponibile"
+      ],
+      "action": "Nessuna azione salvo persistenza oltre la data prevista."
+    },
+    {
+      "id": "local_depot",
+      "severity": "NORMAL",
+      "category": "IN_TRANSIT",
+      "patterns": [
+        "arrivata nella sede gls locale",
+        "arrivata in sede",
+        "partita dalla sede",
+        "in transito"
+      ],
+      "action": "Nessuna azione."
+    },
+    {
+      "id": "created_waiting_handover",
+      "severity": "NORMAL",
+      "category": "LABEL_CREATED",
+      "patterns": [
+        "spedizione e stata creata dal mittente",
+        "spedizione e' stata creata dal mittente",
+        "spedizione è stata creata dal mittente",
+        "attendiamo che ci venga affidata per linvio a destinazione",
+        "attendiamo che ci venga affidata per l'invio a destinazione"
+      ],
+      "action": "Nessuna azione nelle prime 24 ore. Se non viene affidata a GLS, verificare la spedizione.",
+      "escalate_after_hours": 24,
+      "escalate_to": "WATCH",
+      "second_escalate_after_hours": 48,
+      "second_escalate_to": "WARNING"
+    },
+    {
+      "id": "48h_area",
+      "severity": "INFO",
+      "category": "SERVICE_AREA",
+      "patterns": [
+        "zona servita in 48 ore",
+        "entro i prossimi due giorni lavorativi"
+      ],
+      "action": "Informativo: attendere la finestra di consegna indicata."
+    },
+    {
+      "id": "correspondent_area",
+      "severity": "INFO",
+      "category": "CORRESPONDENT",
+      "patterns": [
+        "affidata al corrispondente di zona",
+        "entro i prossimi tre giorni lavorativi"
+      ],
+      "action": "Informativo: monitorare entro la finestra dichiarata.",
+      "escalate_after_hours": 72,
+      "escalate_to": "WARNING"
+    },
+    {
+      "id": "not_arrived_destination",
+      "severity": "INFO",
+      "category": "LINEHAUL_DELAY",
+      "patterns": [
+        "non e ancora arrivata presso la sede gls destinataria",
+        "non è ancora arrivata presso la sede gls destinataria",
+        "non e' ancora arrivata presso la sede gls destinataria",
+        "non e arrivata presso la sede gls destinataria",
+        "non è arrivata presso la sede gls destinataria",
+        "non e' arrivata presso la sede gls destinataria"
+      ],
+      "action": "Informativo nelle prime 24 ore. Se persiste oltre la soglia, monitorare e poi contattare GLS.",
+      "escalate_after_hours": 24,
+      "escalate_to": "WATCH",
+      "second_escalate_after_hours": 48,
+      "second_escalate_to": "WARNING"
+    },
+    {
+      "id": "cod_unavailable",
+      "severity": "WARNING",
+      "category": "COD_ISSUE",
+      "patterns": [
+        "importo contrassegno non disponibile",
+        "contrassegno non disponibile"
+      ],
+      "action": "Verificare il contrassegno e contattare GLS se non si risolve entro il giorno lavorativo.",
+      "escalate_after_hours": 24,
+      "escalate_to": "CRITICAL"
+    },
+    {
+      "id": "refused",
+      "severity": "CRITICAL",
+      "category": "REFUSED",
+      "patterns": [
+        "spedizione e stata rifiutata",
+        "spedizione è stata rifiutata",
+        "spedizione e' stata rifiutata",
+        "rifiutata alla consegna",
+        "destinatario ha rifiutato",
+        "rifiutato dal destinatario"
+      ],
+      "action": "Contattare subito il cliente e la sede GLS per decidere riconsegna o rientro."
+    },
+    {
+      "id": "wrong_address",
+      "severity": "CRITICAL",
+      "category": "ADDRESS_ERROR",
+      "patterns": [
+        "indirizzo errato",
+        "indirizzo incompleto",
+        "indirizzo inesatto",
+        "destinatario sconosciuto",
+        "indirizzo non corretto"
+      ],
+      "action": "Contattare il cliente per correggere i dati e poi la sede GLS."
+    },
+    {
+      "id": "storage",
+      "severity": "CRITICAL",
+      "category": "STORAGE",
+      "patterns": [
+        "spedizione in giacenza",
+        "in attesa di istruzioni",
+        "giacenza presso la sede gls"
+      ],
+      "action": "Gestire immediatamente la giacenza con cliente e GLS."
+    },
+    {
+      "id": "recipient_absent",
+      "severity": "WARNING",
+      "category": "ABSENT",
+      "patterns": [
+        "destinatario assente",
+        "assenza del destinatario",
+        "mancata consegna per assenza"
+      ],
+      "action": "Contattare il cliente per verificare disponibilità e nuova consegna.",
+      "escalate_after_hours": 18,
+      "escalate_to": "CRITICAL"
+    },
+    {
+      "id": "contact_sender",
+      "severity": "WARNING",
+      "category": "ACTION_REQUIRED",
+      "patterns": [
+        "contattare il mittente",
+        "contattare la sede",
+        "necessarie istruzioni",
+        "siamo in attesa di istruzioni"
+      ],
+      "action": "Richiede intervento operativo del mittente."
+    },
+    {
+      "id": "delivery_failure",
+      "severity": "WARNING",
+      "category": "DELIVERY_FAILURE",
+      "patterns": [
+        "consegna non effettuata",
+        "impossibile effettuare la consegna",
+        "non consegnato",
+        "consegna sospesa",
+        "problema di consegna"
+      ],
+      "action": "Verificare il motivo e contattare cliente/GLS."
+    },
+    {
+      "id": "damage_loss",
+      "severity": "CRITICAL",
+      "category": "DAMAGE_OR_LOSS",
+      "patterns": [
+        "danneggiata",
+        "danneggiato",
+        "smarrita",
+        "smarrito",
+        "mancante",
+        "avaria"
+      ],
+      "action": "Aprire verifica immediata con GLS e informare il customer care."
+    },
+    {
+      "id": "returning",
+      "severity": "CRITICAL",
+      "category": "RETURN",
+      "patterns": [
+        "rientro al mittente",
+        "in restituzione al mittente",
+        "reso al mittente",
+        "ritorno al mittente",
+        "riconsegnata al mittente",
+        "riconsegnato al mittente",
+        "consegnata al mittente",
+        "consegnato al mittente"
+      ],
+      "action": "Verificare motivo del rientro e stato ordine Shopify."
+    }
+  ]
+}
