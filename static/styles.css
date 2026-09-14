@@ -87,3 +87,7 @@ button{cursor:pointer}
 
 /* v2.6 - diagnostica sincronizzazione */
 .notice-main{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.notice-main strong{font-weight:850}.notice-main span{color:#92400e}.tech-error-details{margin-top:8px}.tech-error-details summary{cursor:pointer;font-weight:800;color:#9a3412;user-select:none}.tech-sync-summary{margin:10px 0 8px;color:#475467;font-size:12px}.tech-error-group{background:rgba(255,255,255,.68);border:1px solid #fed7aa;border-radius:10px;padding:9px 10px;margin-top:7px}.tech-error-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.tech-error-head code{font-size:10px;color:#9a3412;background:#fff7ed;border-radius:6px;padding:2px 5px}.tech-error-help{margin-top:4px;color:#7c2d12;line-height:1.42}.tech-error-samples{margin-top:10px;border-top:1px solid #fed7aa;padding-top:8px}.tech-error-samples>strong{display:block;margin-bottom:5px}.tech-error-samples>div{padding:5px 0;border-bottom:1px dashed #fed7aa;font-size:11px}.tech-error-samples span{color:#7c2d12;word-break:break-word}
+
+.session-box{display:flex;align-items:center;gap:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.07);border-radius:11px;padding:5px 5px 5px 12px}
+.session-box span{font-size:12px;font-weight:760;color:#fff;white-space:nowrap}
+.session-box .btn{padding:6px 10px;font-size:12px}

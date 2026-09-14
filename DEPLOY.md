@@ -55,8 +55,7 @@ mai il `.env`: su Vercel i valori vivono solo nelle impostazioni del progetto.
 | Variabile | Valore | Obbligatoria |
 |---|---|---|
 | `DATABASE_URL` | la stringa Transaction pooler di Supabase | sì |
-| `DASHBOARD_USER` | nome utente per entrare nella dashboard | sì |
-| `DASHBOARD_PASSWORD` | password lunga e casuale | sì |
+| `DASHBOARD_USERS` | elenco operatori generato da `genera_utenti.py` | sì |
 | `CRON_SECRET` | stringa casuale, protegge la sincronizzazione pianificata | sì |
 | `SHOPIFY_SHOP` | sottodominio del negozio, senza `.myshopify.com` | sì |
 | `SHOPIFY_CLIENT_ID` | client ID dell'app Shopify | sì |
@@ -69,16 +68,62 @@ mai il `.env`: su Vercel i valori vivono solo nelle impostazioni del progetto.
 | `GLS_PASSWORD` | password del web service GLS | sì |
 | `MOCK_MODE` | `false` | no |
 | `SYNC_MAX_TRACKING` | quante spedizioni aggiornare per esecuzione, es. `120` | consigliata |
+| `SESSION_SECRET` | stringa casuale che firma i cookie di sessione | consigliata |
+| `SESSION_DAYS` | durata dell'accesso in giorni, `0` = senza scadenza | no |
+| `SESSION_BIND_IP` | `true` lega la sessione alla rete di accesso | no |
+| `DATABASE_SCHEMA` | schema dedicato, se il progetto Supabase è condiviso | no |
 
-`DASHBOARD_USER` e `DASHBOARD_PASSWORD` non sono facoltative online: se mancano,
-il monitor risponde `503` a ogni richiesta e non mostra nulla. È voluto — il
-database contiene nomi, telefoni e indirizzi dei clienti.
+`DASHBOARD_USERS` non è facoltativa online: se manca, il monitor risponde `503`
+a ogni richiesta e non mostra nulla. È voluto — il database contiene nomi,
+telefoni e indirizzi dei clienti.
 
-Per generare password e segreto:
+Per generare `CRON_SECRET` e `SESSION_SECRET`:
 
 ```bash
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
+
+---
+
+## 2 bis. Gli operatori
+
+Ogni operatore entra con la propria email. Le password non vengono mai salvate
+in chiaro: `genera_utenti.py` produce un hash scrypt, dal quale non si risale
+alla password.
+
+```bash
+python3 genera_utenti.py
+```
+
+Lo script chiede email, nome e password di ciascun operatore e stampa il valore
+da incollare in `DASHBOARD_USERS`. In un solo comando:
+
+```bash
+python3 genera_utenti.py "nome@zuiki.it:Nome:LaPassword"
+```
+
+### Come funziona l'accesso
+
+- Si entra dalla pagina `/login`, non dal popup del browser: così si può anche uscire.
+- Il nome dell'operatore non va più digitato a mano. Ogni nota, svincolo e
+  cambio di stato viene attribuito a chi ha fatto l'accesso.
+- La sessione resta valida **30 giorni sullo stesso browser e dalla stessa
+  rete**: dall'ufficio non vengono richieste le credenziali ogni volta.
+- Da una rete diversa (casa, telefono in 4G) la stessa sessione non vale e viene
+  chiesto di nuovo l'accesso. È una protezione: un cookie rubato non apre la
+  dashboard altrove. Se gli operatori devono entrare da più reti, imposta
+  `SESSION_BIND_IP=false`.
+
+### Cambiare una password
+
+Rilancia `genera_utenti.py` con tutti gli operatori e sostituisci il valore di
+`DASHBOARD_USERS` su Vercel. Al primo deploy successivo le vecchie sessioni
+decadono e le nuove credenziali sono attive.
+
+> Se tutti gli operatori condividono la stessa password, il registro attribuisce
+> sì l'azione a chi ha fatto l'accesso, ma chiunque conosca quella password può
+> entrare come chiunque altro. Per una responsabilità reale conviene dare a
+> ciascuno una password diversa: si cambia solo il valore passato allo script.
 
 ---
 
@@ -200,9 +245,10 @@ vedono lo stesso storico sia dal browser online sia dal Mac.
 
 Dopo il deploy:
 
-1. Apri `https://IL-TUO-PROGETTO.vercel.app` — il browser deve chiedere utente e
-   password.
-2. Entra e premi **Aggiorna**: parte la prima sincronizzazione.
+1. Apri `https://IL-TUO-PROGETTO.vercel.app` — devi essere portato alla pagina
+   di accesso.
+2. Entra con la tua email e premi **Aggiorna**: parte la prima sincronizzazione.
+   In alto a destra deve comparire il tuo nome e il pulsante **Esci**.
 3. Controlla che compaiano le spedizioni e, se hai fatto l'import, lo storico.
 4. Prova il cron a mano:
 

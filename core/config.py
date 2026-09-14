@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from .auth import User, derive_secret, load_users
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = ROOT / ".env"
@@ -73,6 +75,12 @@ class Config:
     dashboard_password: str
     mock_mode: bool
 
+    # Accesso operatori
+    dashboard_users: dict[str, User]
+    session_secret: bytes
+    session_days: int
+    session_bind_ip: bool
+
     # Deploy online
     database_url: str
     serverless: bool
@@ -93,7 +101,15 @@ class Config:
 
     @property
     def dashboard_auth_enabled(self) -> bool:
-        return bool(self.dashboard_user and self.dashboard_password)
+        return bool(self.dashboard_users) or bool(self.dashboard_user and self.dashboard_password)
+
+    @property
+    def multi_user(self) -> bool:
+        return bool(self.dashboard_users)
+
+    @property
+    def session_max_age(self) -> int:
+        return max(0, self.session_days) * 86400
 
     @property
     def uses_postgres(self) -> bool:
@@ -117,6 +133,13 @@ def _database_url() -> str:
             # psycopg non riconosce lo schema "postgres://" usato da alcuni provider.
             if value.startswith("postgres://"):
                 value = "postgresql://" + value[len("postgres://"):]
+            # Uno schema dedicato permette di riusare un progetto Supabase
+            # gia' occupato da un'altra applicazione senza mischiare le tabelle.
+            schema = os.getenv("DATABASE_SCHEMA", "").strip()
+            if schema:
+                from .pgcompat import apply_schema
+
+                value = apply_schema(value, schema)
             return value
     return ""
 
@@ -125,6 +148,8 @@ def get_config() -> Config:
     load_env()
     root = ROOT
     database_url = _database_url()
+    users_raw = os.getenv("DASHBOARD_USERS", "")
+    dashboard_users = load_users(users_raw)
     # Su Vercel il processo e' effimero: niente scheduler in background, niente disco.
     serverless = env_bool("SERVERLESS", bool(os.getenv("VERCEL")))
     # In container (Fly/Render/Railway) la porta arriva da PORT: li' serve 0.0.0.0.
@@ -170,6 +195,11 @@ def get_config() -> Config:
         dashboard_user=os.getenv("DASHBOARD_USER", "").strip(),
         dashboard_password=os.getenv("DASHBOARD_PASSWORD", "").strip(),
         mock_mode=env_bool("MOCK_MODE", False),
+        dashboard_users=dashboard_users,
+        session_secret=derive_secret(users_raw, os.getenv("SESSION_SECRET", "")),
+        # 0 = la sessione non scade da sola.
+        session_days=max(0, env_int("SESSION_DAYS", 30)),
+        session_bind_ip=env_bool("SESSION_BIND_IP", True),
         database_url=database_url,
         serverless=serverless,
         public_deployment=env_bool("PUBLIC_DEPLOYMENT", serverless),

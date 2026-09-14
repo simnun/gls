@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from core import auth
 from core.config import get_config
 from core.db import Database
 from core.sync import SyncEngine
@@ -30,12 +31,58 @@ class AppHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         sys.stdout.write("[%s] %s\n" % (self.log_date_time_string(), fmt % args))
 
+    SESSION_COOKIE = "gls_session"
+
+    def _client_ip(self) -> str:
+        return auth.client_ip_from_headers(self.headers, self.client_address[0] if self.client_address else "")
+
+    def _session_user(self) -> auth.User | None:
+        """Operatore della sessione, se il cookie e' valido."""
+        if not CONFIG.multi_user:
+            return None
+        cookies = auth.parse_cookies(self.headers.get("Cookie", ""))
+        token = cookies.get(self.SESSION_COOKIE, "")
+        if not token:
+            return None
+        username = auth.read_session(
+            token,
+            CONFIG.session_secret,
+            max_age_seconds=CONFIG.session_max_age,
+            client_ip=self._client_ip(),
+            bind_ip=CONFIG.session_bind_ip,
+        )
+        if not username:
+            return None
+        return CONFIG.dashboard_users.get(username)
+
+    def _set_session_cookie(self, token: str, max_age: int) -> None:
+        secure = "; Secure" if self._is_https() else ""
+        # Max-Age=0 cancella il cookie.
+        self.send_header(
+            "Set-Cookie",
+            f"{self.SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}",
+        )
+
+    def _is_https(self) -> bool:
+        proto = (self.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+        return proto == "https" or CONFIG.public_deployment
+
     def _authorized(self) -> bool:
         if not CONFIG.dashboard_auth_enabled:
+            return True
+        if self._session_user() is not None:
             return True
         header = self.headers.get("Authorization", "")
         if not header.startswith("Basic "):
             return False
+        if CONFIG.multi_user:
+            # Anche via Basic si accede con le credenziali di un operatore.
+            try:
+                decoded = base64.b64decode(header[6:]).decode("utf-8")
+                username, password = decoded.split(":", 1)
+            except Exception:
+                return False
+            return auth.authenticate(CONFIG.dashboard_users, username, password) is not None
         try:
             decoded = base64.b64decode(header[6:]).decode("utf-8")
             user, password = decoded.split(":", 1)
@@ -69,6 +116,18 @@ class AppHandler(BaseHTTPRequestHandler):
             return False
         if self._authorized():
             return True
+        # Con gli operatori configurati si passa dalla pagina di accesso:
+        # il popup del browser non permette di uscire ne' di restare collegati.
+        if CONFIG.multi_user:
+            if urlparse(self.path).path.startswith("/api/"):
+                self._json({"error": "Sessione scaduta o assente", "login_required": True},
+                           HTTPStatus.UNAUTHORIZED)
+            else:
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", "/login")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            return False
         self.send_response(HTTPStatus.UNAUTHORIZED)
         self.send_header("WWW-Authenticate", 'Basic realm="GLS Exception Monitor"')
         self.send_header("Content-Length", "0")
@@ -107,8 +166,25 @@ class AppHandler(BaseHTTPRequestHandler):
         # Il cron esterno si autentica con CRON_SECRET, non con le credenziali dashboard.
         if path == "/api/cron/sync":
             return self._handle_cron_sync()
+        # La pagina di accesso deve essere raggiungibile da chi non e' ancora entrato.
+        if path == "/login":
+            if CONFIG.multi_user and self._session_user() is not None:
+                self.send_response(HTTPStatus.FOUND)
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self._serve_static("/login.html")
         if not self._require_auth():
             return
+
+        if path == "/api/me":
+            user = self._session_user()
+            return self._json({
+                "authenticated": True,
+                "multi_user": CONFIG.multi_user,
+                "user": user.public() if user else None,
+            })
         if path == "/api/dashboard":
             qs = parse_qs(parsed.query)
             include_closed = (qs.get("include_closed", ["false"])[0].lower() == "true")
@@ -203,10 +279,16 @@ class AppHandler(BaseHTTPRequestHandler):
         return self._serve_static(path)
 
     def do_POST(self) -> None:
-        if not self._require_auth():
-            return
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if path == "/api/login":
+            return self._handle_login()
+        if path == "/api/logout":
+            return self._handle_logout()
+
+        if not self._require_auth():
+            return
         try:
             if path == "/api/open-incognito":
                 body = self._read_json()
@@ -386,6 +468,48 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _handle_login(self) -> None:
+        if not CONFIG.multi_user:
+            return self._json({"error": "Accesso per operatori non configurato"}, 400)
+        try:
+            body = self._read_json()
+        except Exception:
+            return self._json({"error": "Richiesta non valida"}, 400)
+
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        user = auth.authenticate(CONFIG.dashboard_users, username, password)
+        if user is None:
+            # Nessun dettaglio su cosa fosse sbagliato: eviterebbe di rivelare
+            # quali indirizzi esistono.
+            return self._json({"error": "Email o password non corretti"}, 401)
+
+        token = auth.create_session(
+            user.username,
+            CONFIG.session_secret,
+            self._client_ip() if CONFIG.session_bind_ip else "",
+        )
+        payload = json.dumps({"ok": True, "user": user.public()}, ensure_ascii=False).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        # Senza scadenza esplicita il cookie dura un anno: l'accesso resta
+        # valido nel tempo dalla stessa rete.
+        self._set_session_cookie(token, CONFIG.session_max_age or 365 * 86400)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _handle_logout(self) -> None:
+        payload = json.dumps({"ok": True}).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self._set_session_cookie("", 0)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def _handle_cron_sync(self) -> None:
         """Sincronizzazione pianificata, chiamata da un cron esterno."""
         if not (self._cron_authorized() or (not CONFIG.auth_required_but_missing and self._authorized())):
@@ -448,6 +572,8 @@ class AppHandler(BaseHTTPRequestHandler):
             "serverless": CONFIG.serverless,
             "storage": "postgres" if CONFIG.uses_postgres else "sqlite",
             "native_incognito": sys.platform == "darwin",
+            "multi_user": CONFIG.multi_user,
+            "current_user": (lambda u: u.public() if u else None)(self._session_user()),
         }
 
     def _links(self, item: dict) -> dict:

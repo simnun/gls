@@ -134,6 +134,11 @@ function formatEta(seconds) {
 }
 
 function getOperatorName(requireName = false) {
+  // Con l'accesso per operatori il nome e' quello di chi ha fatto il login:
+  // cosi ogni azione resta attribuita a una persona reale, non a un campo libero.
+  const signedIn = (state.data?.config?.current_user?.display_name || '').trim();
+  if (signedIn) return signedIn;
+
   const name = ($('#operatorInput')?.value || '').trim();
   if (requireName && !name) {
     showToast('Inserisci il tuo nome nel campo Operatore prima di registrare un’azione.', true);
@@ -141,6 +146,27 @@ function getOperatorName(requireName = false) {
     return null;
   }
   return name;
+}
+
+function renderSession() {
+  const user = state.data?.config?.current_user;
+  const box = $('#sessionBox');
+  const field = $('#operatorField');
+  if (!user) return;
+  // Il campo libero non serve piu': l'identita' arriva dall'accesso.
+  field?.classList.add('hidden');
+  box?.classList.remove('hidden');
+  const label = $('#sessionName');
+  if (label) label.textContent = user.display_name || user.username;
+}
+
+async function logout() {
+  try {
+    await api('/api/logout', { method: 'POST', body: '{}' });
+  } catch (err) {
+    // Anche se la chiamata fallisce si torna comunque alla pagina di accesso.
+  }
+  window.location.replace('/login');
 }
 
 function showToast(message, error = false) {
@@ -194,6 +220,11 @@ async function api(path, options = {}) {
   });
   let payload = {};
   try { payload = await response.json(); } catch {}
+  if (response.status === 401 && payload.login_required) {
+    // Sessione scaduta o aperta da un'altra rete: si rientra dall'accesso.
+    window.location.replace('/login');
+    throw new Error('Sessione scaduta');
+  }
   if (!response.ok) throw new Error(payload.error || payload.message || `HTTP ${response.status}`);
   return payload;
 }
@@ -311,6 +342,7 @@ async function loadDashboard({quiet = false} = {}) {
     const data = await api('/api/dashboard?include_closed=true');
     state.data = data;
     await loadInconsistencies({quiet:true});
+    renderSession();
     renderKpis();
     renderConnection();
     renderTable();
@@ -903,6 +935,7 @@ function bind() {
   $('#operatorInput').addEventListener('input', e => localStorage.setItem('glsMonitorOperator', e.target.value.trim()));
   $('#syncBtn').addEventListener('click', syncNow);
   $('#diagnosticsBtn').addEventListener('click', diagnostics);
+  $('#logoutBtn')?.addEventListener('click', logout);
   $('#drawerClose').addEventListener('click', closeDrawer);
   $('#drawerBackdrop').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });

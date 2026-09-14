@@ -123,8 +123,10 @@ In sintesi:
   condivisa e' raggiungibile da qualsiasi postazione;
 - `migrate_to_postgres.py` porta online lo storico gia' presente sul Mac
   (note, giacenze, svincoli, incongruenze), senza duplicare nulla;
-- online l'accesso richiede sempre utente e password, altrimenti il monitor
-  non mostra nulla;
+- ogni operatore entra con la propria email da una pagina di accesso dedicata,
+  e le azioni registrate riportano il suo nome senza doverlo digitare;
+- online l'accesso e' obbligatorio: senza operatori configurati il monitor non
+  mostra nulla;
 - la sincronizzazione periodica viene richiamata da un cron esterno su
   `/api/cron/sync`, protetto da `CRON_SECRET`.
 

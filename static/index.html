@@ -14,7 +14,8 @@
       <div><div class="eyebrow">ZUIKI · OPERATIONS</div><h1>GLS Monitor</h1><p>Eccezioni, giacenze, interventi e incongruenze in un'unica coda operativa.</p></div>
     </div>
     <div class="header-actions">
-      <label class="operator-field" title="Il nome viene memorizzato solo in questo browser"><span>Operatore</span><input id="operatorInput" type="text" maxlength="60" placeholder="Il tuo nome" autocomplete="name"></label>
+      <label id="operatorField" class="operator-field" title="Il nome viene memorizzato solo in questo browser"><span>Operatore</span><input id="operatorInput" type="text" maxlength="60" placeholder="Il tuo nome" autocomplete="name"></label>
+      <div id="sessionBox" class="session-box hidden"><span id="sessionName"></span><button id="logoutBtn" class="btn ghost" type="button">Esci</button></div>
       <span id="connectionBadge" class="status-chip neutral"><span class="status-dot"></span> Caricamento…</span>
       <button id="diagnosticsBtn" class="btn ghost">Diagnostica</button>
       <button id="syncBtn" class="btn primary"><span class="btn-icon">↻</span> Aggiorna</button>

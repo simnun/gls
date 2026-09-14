@@ -15,9 +15,53 @@ import re
 import threading
 from contextlib import contextmanager
 from typing import Any, Iterator, Sequence
+from urllib.parse import quote
 
 import psycopg
 from psycopg.rows import dict_row
+
+
+SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+
+
+def apply_schema(dsn: str, schema: str) -> str:
+    """Aggiunge al DSN lo schema in cui lavorare.
+
+    Passa per il parametro `options` della connessione e non con `SET
+    search_path`: il pooler in transaction mode puo' cambiare connessione
+    server a ogni transazione, e un SET di sessione non sopravviverebbe.
+    """
+    schema = (schema or "").strip().lower()
+    if not schema:
+        return dsn
+    if not SCHEMA_RE.match(schema):
+        raise ValueError(
+            f"Nome schema non valido: {schema!r}. "
+            "Ammessi lettere minuscole, cifre e trattino basso."
+        )
+    if "options=" in dsn:
+        return dsn
+    separator = "&" if "?" in dsn else "?"
+    return dsn + separator + "options=" + quote(f"-c search_path={schema}")
+
+
+def schema_from_dsn(dsn: str) -> str:
+    """Schema indicato nel DSN tramite `options=-c search_path=...`, se presente."""
+    match = re.search(r"search_path%3D([a-z0-9_]+)|search_path=([a-z0-9_]+)", dsn, re.IGNORECASE)
+    if not match:
+        return ""
+    return (match.group(1) or match.group(2) or "").lower()
+
+
+def ensure_schema(dsn: str, schema: str) -> None:
+    """Crea lo schema se manca, cosi le tabelle non finiscono in `public`."""
+    schema = (schema or "").strip().lower()
+    if not schema:
+        return
+    if not SCHEMA_RE.match(schema):
+        raise ValueError(f"Nome schema non valido: {schema!r}")
+    with psycopg.connect(dsn, autocommit=True, connect_timeout=15) as conn:
+        conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
 
 
 def _prepare_threshold() -> int | None:
@@ -233,10 +277,18 @@ class ConnectionPool:
         self._max_idle = max_idle
         self._idle: list[psycopg.Connection] = []
         self._lock = threading.Lock()
+        self._schema = schema_from_dsn(dsn)
+        self._schema_ready = not self._schema
 
     def _new(self) -> psycopg.Connection:
         conn = psycopg.connect(self._dsn, autocommit=False, connect_timeout=15)
         conn.prepare_threshold = _prepare_threshold()
+        if not self._schema_ready:
+            # Senza lo schema, una CREATE TABLE non qualificata non troverebbe
+            # dove creare la tabella. CREATE SCHEMA non dipende da search_path.
+            conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
+            conn.commit()
+            self._schema_ready = True
         return conn
 
     def acquire(self) -> psycopg.Connection:
