@@ -67,6 +67,7 @@ class Database:
                     order_created_at TEXT,
                     fulfillment_created_at TEXT,
                     fulfillment_updated_at TEXT,
+                    gls_checked_at TEXT,
                     customer_gid TEXT,
                     customer_legacy_id TEXT,
                     customer_name TEXT,
@@ -265,6 +266,7 @@ class Database:
             "tracking_revision": "INTEGER NOT NULL DEFAULT 0",
             "fulfillment_created_at": "TEXT",
             "fulfillment_updated_at": "TEXT",
+            "gls_checked_at": "TEXT",
         }
         for name, decl in additions.items():
             if name not in cols:
@@ -436,7 +438,11 @@ class Database:
     def list_open_shipments_for_sync(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM shipments WHERE closed=0 ORDER BY COALESCE(gls_event_at,last_seen_at) ASC"
+                # Prima chi non e' mai stato interrogato (gls_checked_at nullo),
+                # poi chi lo e' stato meno di recente: cosi su piu' esecuzioni la
+                # copertura arriva a tutte invece di ripassare sempre le stesse.
+                "SELECT * FROM shipments WHERE closed=0 "
+                "ORDER BY COALESCE(gls_checked_at,'') ASC, COALESCE(gls_event_at,last_seen_at) ASC"
             ).fetchall()
             return [self._shipment_row(dict(r)) for r in rows]
 
@@ -532,6 +538,7 @@ class Database:
                 "gls_destination_depot": data.get("gls_destination_depot"),
                 "gls_destination_city": data.get("gls_destination_city"),
                 "gls_destination_phone": data.get("gls_destination_phone"),
+                "gls_checked_at": data.get("gls_checked_at") or now,
                 "severity": data.get("severity", "WATCH"),
                 "category": data.get("category", "UNCLASSIFIED"),
                 "reason": data.get("reason", ""),
@@ -563,6 +570,87 @@ class Database:
                 f"ON CONFLICT(tracking_number) DO UPDATE SET {updates}",
                 tuple(fields.values()),
             )
+
+    # Dati di provenienza Shopify: sono gli unici che un aggiornamento puo'
+    # sovrascrivere. Stato GLS, classificazione e lavoro dell'operatore no.
+    CAMPI_SHOPIFY_AGGIORNABILI = (
+        "order_gid", "order_legacy_id", "order_name", "order_created_at",
+        "fulfillment_created_at", "fulfillment_updated_at", "customer_gid",
+        "customer_legacy_id", "customer_name", "customer_email", "customer_phone",
+        "city", "province", "total_amount", "currency", "payment_gateways",
+        "is_cod", "shopify_financial_status", "shopify_fulfillment_status",
+        "last_seen_at",
+    )
+
+    @staticmethod
+    def _campi_pending(data: dict[str, Any], now: str) -> dict[str, Any]:
+        return {
+            "tracking_number": str(data.get("tracking_number") or ""),
+            "order_gid": data.get("order_gid"),
+            "order_legacy_id": data.get("order_legacy_id"),
+            "order_name": data.get("order_name"),
+            "order_created_at": data.get("order_created_at"),
+            "fulfillment_created_at": data.get("fulfillment_created_at"),
+            "fulfillment_updated_at": data.get("fulfillment_updated_at"),
+            "customer_gid": data.get("customer_gid"),
+            "customer_legacy_id": data.get("customer_legacy_id"),
+            "customer_name": data.get("customer_name"),
+            "customer_email": data.get("customer_email"),
+            "customer_phone": data.get("customer_phone"),
+            "city": data.get("city"),
+            "province": data.get("province"),
+            "total_amount": data.get("total_amount"),
+            "currency": data.get("currency"),
+            "payment_gateways": json.dumps(data.get("payment_gateways", []), ensure_ascii=False),
+            "is_cod": 1 if data.get("is_cod") else 0,
+            "shopify_financial_status": data.get("shopify_financial_status"),
+            "shopify_fulfillment_status": data.get("shopify_fulfillment_status"),
+            "gls_status": "In attesa di controllo GLS",
+            "gls_note": "Spedizione rilevata su Shopify; il tracking GLS verra' interrogato alla prossima sincronizzazione.",
+            "severity": "INFO",
+            "category": "PENDING_CHECK",
+            "reason": "Non ancora interrogata a GLS",
+            "recommended_action": "Nessuna azione: in coda per il controllo automatico.",
+            "workflow_status": "NEW",
+            "first_seen_at": now,
+            "last_seen_at": now,
+            "last_changed_at": now,
+            "closed": 0,
+            "source": data.get("source", "shopify"),
+        }
+
+    def register_pending_shipments(self, items: list[dict[str, Any]]) -> int:
+        """Registra le spedizioni viste su Shopify ma non ancora interrogate a GLS.
+
+        Senza questo passaggio le spedizioni rinviate per mancanza di tempo
+        andrebbero perse: non essendo nel database non verrebbero riprese, e la
+        ricerca incrementale su Shopify non le ritroverebbe piu'. Sono proprio le
+        piu' vecchie, cioe' quelle dove stanno giacenze e mancate consegne.
+
+        Su una spedizione gia' nota si aggiornano solo i dati Shopify: stato GLS,
+        classificazione e lavoro dell'operatore restano intatti. `gls_checked_at`
+        resta vuoto finche' non arriva la prima interrogazione vera, ed e' quello
+        che manda la spedizione in cima alla coda del prossimo giro.
+        """
+        if not items:
+            return 0
+        now = utcnow()
+        aggiornamenti = ",".join(f"{k}=excluded.{k}" for k in self.CAMPI_SHOPIFY_AGGIORNABILI)
+        scritte = 0
+        with self.connect() as conn:
+            for data in items:
+                campi = self._campi_pending(data, now)
+                if not campi["tracking_number"]:
+                    continue
+                colonne = ",".join(campi)
+                segnaposto = ",".join("?" for _ in campi)
+                conn.execute(
+                    f"INSERT INTO shipments({colonne}) VALUES({segnaposto}) "
+                    f"ON CONFLICT(tracking_number) DO UPDATE SET {aggiornamenti}",
+                    tuple(campi.values()),
+                )
+                scritte += 1
+        return scritte
 
     def insert_event(self, event: dict[str, Any]) -> bool:
         # DO NOTHING invece di intercettare l'errore di integrita': su Postgres

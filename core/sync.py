@@ -69,20 +69,22 @@ def no_events_pickup_state(shipment: dict[str, Any], now: datetime | None = None
 
 def select_sync_batch(
     targets: list[dict[str, Any]], limit: int
-) -> tuple[list[dict[str, Any]], int]:
-    """Sceglie quante spedizioni aggiornare in questa esecuzione.
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Sceglie quante spedizioni interrogare in questa esecuzione.
 
     Dove la richiesta ha un tempo massimo (deploy serverless) non si possono
-    interrogare tutte le spedizioni in un colpo solo. Si ordina per ultima visita
-    crescente, cosi il turno tocca prima alle nuove (senza `last_seen_at`) e poi
-    alle piu' ferme: su piu' esecuzioni la copertura resta completa.
+    interrogare tutte le spedizioni in un colpo solo. L'ordine e' per ultima
+    interrogazione GLS crescente: prima chi non e' mai stato controllato
+    (`gls_checked_at` vuoto), poi chi lo e' stato meno di recente. Cosi su piu'
+    esecuzioni il turno tocca a tutte, invece di ripassare sempre le stesse.
 
-    Restituisce il lotto da elaborare e quante spedizioni sono state rinviate.
+    Restituisce il lotto da elaborare e l'elenco delle spedizioni rinviate, che
+    va comunque registrato per non perderle.
     """
     if limit <= 0 or len(targets) <= limit:
-        return targets, 0
-    ordered = sorted(targets, key=lambda s: str(s.get("last_seen_at") or ""))
-    return ordered[:limit], len(ordered) - limit
+        return targets, []
+    ordered = sorted(targets, key=lambda s: str(s.get("gls_checked_at") or ""))
+    return ordered[:limit], ordered[limit:]
 
 
 def technical_error_info(message: str) -> dict[str, Any]:
@@ -298,8 +300,12 @@ class SyncEngine:
                 if tracking not in fresh_numbers:
                     carried_open += 1
 
-            targets, deferred = select_sync_batch(targets, getattr(self.config, "sync_max_tracking", 0))
+            targets, rimandate = select_sync_batch(targets, getattr(self.config, "sync_max_tracking", 0))
             budget = getattr(self.config, "sync_time_budget_seconds", 0)
+            # Registrate subito: una spedizione rinviata e mai salvata sparirebbe,
+            # perche' la ricerca incrementale su Shopify non la ritroverebbe.
+            self.db.register_pending_shipments(rimandate)
+            deferred = len(rimandate)
             tracking_numbers = len(targets)
 
             if tracking_numbers == 0:
@@ -339,9 +345,12 @@ class SyncEngine:
                     # interrotta d'autorita' lascerebbe la pratica aperta per sempre
                     # e nessun conteggio salvato.
                     if budget and (time.monotonic() - sync_started_monotonic) > budget:
-                        for rimasto, spedizione in future_map.items():
-                            if rimasto.cancel():
-                                deferred += 1
+                        annullate = [
+                            spedizione for rimasto, spedizione in future_map.items()
+                            if rimasto.cancel()
+                        ]
+                        self.db.register_pending_shipments(annullate)
+                        deferred += len(annullate)
                         break
                     shipment = future_map[future]
                     self._set_progress(current_tracking=shipment.get("tracking_number"))
@@ -430,6 +439,8 @@ class SyncEngine:
         # finestra intera, che resta corretta, non far fallire l'intera
         # sincronizzazione.
         try:
+            if getattr(self.config, "shopify_full_scan", False):
+                return None
             ultima = self.db.last_successful_sync_at()
             if not ultima:
                 return None
@@ -449,6 +460,8 @@ class SyncEngine:
             return None
 
     def _save_tracking(self, shipment: dict[str, Any], tracked: dict[str, Any]) -> None:
+        # gls_checked_at viene impostato da upsert_shipment: e' il campo che
+        # determina il turno nella coda delle prossime esecuzioni.
         current = tracked.get("current_event") or {}
         classification = self.classifier.classify(
             code=current.get("code") or tracked.get("code"),

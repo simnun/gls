@@ -22,6 +22,7 @@ from core.sync import SyncEngine  # noqa: E402
 class ConfigurazioneFinta:
     shopify_lookback_days = 21
     shopify_overlap_minutes = 60
+    shopify_full_scan = False
     rules_path = ROOT / "config" / "rules.json"
     # Attributi richiesti dai client, non usati in questi test.
     shopify_shop = ""
@@ -102,6 +103,15 @@ class FinestraIncrementaleTests(unittest.TestCase):
         with self.db.connect() as conn:
             conn.execute("UPDATE sync_runs SET started_at=? WHERE id=?", (vecchia, sync_id))
         self.db.close_stale_syncs(older_than_minutes=1)
+        self.assertIsNone(self.engine._shopify_since())
+
+
+    def test_la_scansione_completa_puo_essere_forzata(self):
+        # Serve dopo un cambio di logica, per ripescare cio' che era sfuggito.
+        sync_id = self.db.start_sync()
+        self.db.finish_sync(sync_id, "OK")
+        self.assertIsNotNone(self.engine._shopify_since())
+        self.engine.config.shopify_full_scan = True
         self.assertIsNone(self.engine._shopify_since())
 
 

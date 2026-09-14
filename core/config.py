@@ -68,6 +68,7 @@ class Config:
     shopify_api_version: str
     shopify_lookback_days: int
     shopify_overlap_minutes: int
+    shopify_full_scan: bool
 
     gls_site: str
     gls_customer_code: str
@@ -193,6 +194,8 @@ def get_config() -> Config:
         shopify_lookback_days=env_int("SHOPIFY_LOOKBACK_DAYS", 21),
         # Margine di sovrapposizione della ricerca incrementale su Shopify.
         shopify_overlap_minutes=max(0, env_int("SHOPIFY_OVERLAP_MINUTES", 60)),
+        # Forza la scansione dell'intera finestra invece di quella incrementale.
+        shopify_full_scan=env_bool("SHOPIFY_FULL_SCAN", False),
         gls_site=env_str("GLS_SITE"),
         gls_customer_code=env_str("GLS_CUSTOMER_CODE"),
         gls_contract_code=env_str("GLS_CONTRACT_CODE"),
