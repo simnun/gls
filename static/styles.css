@@ -102,3 +102,17 @@ button{cursor:pointer}
 /* Testi lunghi: vanno a capo invece di allargare la colonna. */
 .shipments-table td{overflow-wrap:anywhere}
 .shipments-table .tracking-code,.shipments-table .cell-sub{overflow-wrap:anywhere}
+
+/* Pastiglia "gia' gestita": dice in elenco a che punto e' la lavorazione. */
+.handled-chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 9px;font-size:10px;font-weight:850;margin-bottom:6px;white-space:nowrap;border:1px solid transparent}
+.handled-chip span{font-size:11px;line-height:1}
+.handled-chip.gestita{background:#eef2f6;color:#475467;border-color:#dde3ea}
+.handled-chip.da-svincolare{background:var(--warning-bg);color:var(--warning);border-color:#fedf89}
+.handled-chip.inviato{background:var(--info-bg);color:var(--info);border-color:#b2ddff}
+.internal-banner.handled.da-svincolare{background:var(--warning-bg);border-color:#fedf89}
+.internal-banner.handled.da-svincolare .icon{background:#fedf89;color:var(--warning)}
+.internal-banner.handled.da-svincolare strong{color:#93370d}
+.internal-banner.handled.gestita{background:#f7f9fb;border-color:#dde3ea}
+.internal-banner.handled.gestita .icon{background:#e4e9ef;color:#475467}
+.internal-banner.handled.gestita strong{color:#344054}
+.handled-note{display:block;margin:5px 0 3px;font-style:normal;font-weight:800;color:var(--ink);font-size:12.5px;overflow-wrap:anywhere}

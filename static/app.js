@@ -98,6 +98,47 @@ function orderNumeric(value) {
   const m = String(value || '').match(/\d+/g);
   return m ? Number(m.join('')) : 0;
 }
+// Anomalie che GLS risolve aprendo una giacenza il giorno dopo: sono i casi in
+// cui l'operatore raccoglie le informazioni oggi e svincola domani.
+const CATEGORIE_VERSO_GIACENZA = ['ADDRESS_ERROR', 'ABSENT', 'REFUSED', 'ACTION_REQUIRED',
+  'COD_ISSUE', 'DELIVERY_FAILURE', 'DAMAGE_OR_LOSS'];
+
+function statoGestione(row) {
+  // Dice a colpo d'occhio se una pratica e' gia' stata lavorata e cosa manca.
+  // Funziona sia con i dati dell'elenco (contatori aggregati) sia con quelli
+  // del dettaglio (elenchi completi di giacenze e svincoli).
+  if (!row || row.closed) return null;
+  const inLavorazione = ['IN_PROGRESS', 'WAITING_CUSTOMER', 'WAITING_GLS'].includes(row.workflow_status);
+  const haLavoro = Boolean((row.operator_note || '').trim() || row.last_operator_action);
+  if (!inLavorazione || !haLavoro) return null;
+
+  const svincolato = Number(row.release_count || 0) > 0
+    || (row.releases || []).some(r => Number(r.gls_success) === 1);
+  const giacenzaAperta = Number(row.open_stock_cases || 0) > 0
+    || (row.stock_cases || []).some(sc => sc.status === 'OPEN')
+    || row.category === 'STORAGE';
+
+  if (svincolato) return {
+    classe: 'inviato', icona: '✓', testo: 'Svincolo inviato',
+    dettaglio: 'Lo svincolo e\u2019 gia\u2019 stato inviato a GLS: si attende il riscontro.',
+  };
+  if (giacenzaAperta) return {
+    classe: 'da-svincolare', icona: '⚠', testo: 'Da svincolare',
+    dettaglio: 'Pratica gia\u2019 gestita e giacenza aperta: manca solo lo svincolo.',
+  };
+  if (CATEGORIE_VERSO_GIACENZA.includes(row.category)) return {
+    classe: 'gestita', icona: '●', testo: 'Gestita · attende giacenza',
+    dettaglio: 'Le informazioni sono gia\u2019 state raccolte: si attende che GLS apra la giacenza.',
+  };
+  return null;
+}
+
+function pastigliaGestione(row) {
+  const s = statoGestione(row);
+  if (!s) return '';
+  return `<div class="handled-chip ${s.classe}" title="${esc(s.dettaglio)}"><span>${s.icona}</span>${esc(s.testo)}</div>`;
+}
+
 function priorityRank(row) {
   if (row.has_inconsistency) return 6;
   return {CRITICAL:5, WARNING:4, WATCH:3, INFO:2, NORMAL:1}[row.effective_severity || row.severity] || 0;
@@ -490,7 +531,7 @@ function renderTable() {
         <td><div class="customer-main">${esc(row.customer_name || 'Cliente non disponibile')}</div><div class="cell-sub">${esc(location)}</div></td>
         <td><div class="event-title">${esc(current)}</div>${note ? `<div class="event-note" title="${esc(note)}">${esc(note)}</div>` : ''}${row.has_inconsistency ? `<div class="cell-alert">${esc(row.inconsistency_titles || '')}</div>` : ''}</td>
         <td><div>${esc(age(row.gls_event_at))}</div><div class="cell-sub">${esc(formatDate(row.gls_event_at))}</div></td>
-        <td><span class="workflow-pill ${esc(row.workflow_status)}">${esc(workflowLabels[row.workflow_status] || row.workflow_status)}</span>${activity}</td>
+        <td>${pastigliaGestione(row)}<span class="workflow-pill ${esc(row.workflow_status)}">${esc(workflowLabels[row.workflow_status] || row.workflow_status)}</span>${activity}</td>
         <td><button class="row-btn" data-open="${esc(row.tracking_number)}">Gestisci →</button></td>
       </tr>`;
   }).join('');
@@ -622,7 +663,21 @@ function drawerHtml(item) {
   const spokiPhone = phoneDigits(item.customer_phone || '');
   const spokiUrl = spokiPhone ? `https://app.spoki.com/contacts?search=${encodeURIComponent(spokiPhone)}` : '';
 
-  const internalBanner = item.last_operator_action ? `
+  // Se la pratica e' gia' stata lavorata, la prima cosa che si deve vedere e'
+  // cosa era stato raccolto: serve per compilare lo svincolo senza cercarlo
+  // nella cronologia.
+  const gestione = statoGestione(item);
+  const notaOperatore = (item.operator_note || '').trim();
+  const internalBanner = gestione ? `
+    <div class="internal-banner handled ${gestione.classe}">
+      <div class="icon">${gestione.icona}</div>
+      <div>
+        <strong>${esc(gestione.testo)} · ${esc(item.last_operator_name || 'Operatore')} il ${esc(formatDate(item.last_operator_action_at))}</strong>
+        ${notaOperatore ? `<em class="handled-note">${esc(notaOperatore)}</em>` : ''}
+        <span>${esc(gestione.dettaglio)}</span>
+      </div>
+    </div>`
+    : item.last_operator_action ? `
     <div class="internal-banner"><div class="icon">✓</div><div><strong>Intervento già registrato: ${esc(item.last_operator_action)}</strong><span>${esc(item.last_operator_name || 'Operatore')} · ${esc(formatDate(item.last_operator_action_at))}. Lo stato GLS può restare invariato finché la sede non recepisce l'operazione.</span></div></div>` : '';
 
   const issueBox = issues.length ? `

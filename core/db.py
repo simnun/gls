@@ -816,7 +816,9 @@ class Database:
                 f"""
                 SELECT s.*,
                        COALESCE(ic.inconsistency_count,0) AS inconsistency_count,
-                       COALESCE(ic.inconsistency_titles,'') AS inconsistency_titles
+                       COALESCE(ic.inconsistency_titles,'') AS inconsistency_titles,
+                       COALESCE(gi.open_stock_cases,0) AS open_stock_cases,
+                       COALESCE(sv.release_count,0) AS release_count
                 FROM shipments s
                 LEFT JOIN (
                     SELECT tracking_number, COUNT(*) AS inconsistency_count,
@@ -824,6 +826,19 @@ class Database:
                     FROM inconsistencies WHERE active=1
                     GROUP BY tracking_number
                 ) ic ON ic.tracking_number=s.tracking_number
+                -- Giacenze aperte e svincoli inviati: servono in elenco per
+                -- distinguere una pratica gia' lavorata da una ancora intatta.
+                -- Aggregati una volta sola, non una query per spedizione.
+                LEFT JOIN (
+                    SELECT tracking_number, COUNT(*) AS open_stock_cases
+                    FROM stock_cases WHERE status='OPEN'
+                    GROUP BY tracking_number
+                ) gi ON gi.tracking_number=s.tracking_number
+                LEFT JOIN (
+                    SELECT tracking_number, COUNT(*) AS release_count
+                    FROM gls_release_requests WHERE gls_success=1
+                    GROUP BY tracking_number
+                ) sv ON sv.tracking_number=s.tracking_number
                 WHERE {where}
                 ORDER BY
                     CASE WHEN COALESCE(ic.inconsistency_count,0)>0 THEN 6
