@@ -348,6 +348,12 @@ async function loadDashboard({quiet = false} = {}) {
     renderKpis();
     renderConnection();
     renderTable();
+    // Una sincronizzazione avviata dallo scheduler deve comparire comunque:
+    // fra un sondaggio e l'altro il pulsante resterebbe altrimenti cliccabile.
+    if (data.sync_running) {
+      setSyncBusy(true);
+      startSyncPolling();
+    }
     loadInconsistencies({quiet:true}).then(() => { renderKpis(); renderTable(); });
     if (data.sync_running) startSyncPolling();
   } catch (err) {
@@ -801,6 +807,20 @@ function bindDrawer(item) {
   });
 }
 
+function setSyncBusy(busy) {
+  // Un'unica funzione decide l'aspetto del pulsante: finche' una
+  // sincronizzazione e' in corso non dev'essere cliccabile, altrimenti si
+  // ottiene soltanto un errore "gia' in corso".
+  const btn = $('#syncBtn');
+  if (!btn) return;
+  btn.disabled = Boolean(busy);
+  btn.classList.toggle('busy', Boolean(busy));
+  btn.title = busy ? 'Sincronizzazione già in corso' : 'Aggiorna i dati da Shopify e GLS';
+  btn.innerHTML = busy
+    ? '<span class="btn-icon spin">↻</span> Aggiornamento…'
+    : '<span class="btn-icon">↻</span> Aggiorna';
+}
+
 function renderSyncProgress(p) {
   const panel = $('#syncPanel');
   const bar = $('#syncProgressBar');
@@ -827,9 +847,7 @@ function renderSyncProgress(p) {
   bar.style.width = total ? `${Math.min(100, percent)}%` : '';
   spinner.classList.toggle('done', !p.running && p.phase === 'DONE');
 
-  const btn = $('#syncBtn');
-  btn.disabled = Boolean(p.running);
-  btn.innerHTML = p.running ? '<span class="btn-icon">↻</span> Aggiornamento…' : '<span class="btn-icon">↻</span> Aggiorna';
+  setSyncBusy(p.running);
 }
 
 async function pollSyncProgress() {
@@ -862,7 +880,9 @@ function startSyncPolling() {
 
 async function syncNow() {
   const btn = $('#syncBtn');
-  btn.disabled = true;
+  if (btn.disabled || state.syncTimer) return;
+  setSyncBusy(true);
+  $('#syncPanel')?.classList.remove('hidden');
   try {
     const res = await api('/api/sync', { method:'POST', body:'{}' });
     if (res && res.done) {
@@ -870,13 +890,13 @@ async function syncNow() {
       showToast('Sincronizzazione completata');
       await loadDashboard({quiet:true});
       await loadStockHistory({quiet:true});
-      btn.disabled = false;
+      setSyncBusy(false);
       return;
     }
     showToast('Sincronizzazione avviata');
     startSyncPolling();
   } catch (err) {
-    btn.disabled = false;
+    setSyncBusy(false);
     showToast(err.message, true);
   }
 }
@@ -1030,5 +1050,7 @@ function bind() {
 bind();
 loadDashboard();
 loadStockHistory({quiet:true});
-pollSyncProgress();
+// Se all'apertura una sincronizzazione e' gia' in corso, la barra deve
+// aggiornarsi da sola invece di restare ferma sul primo valore letto.
+pollSyncProgress().then(inCorso => { if (inCorso) startSyncPolling(); });
 setInterval(() => { loadDashboard({quiet:true}); loadStockHistory({quiet:true}); }, 30000);

@@ -93,3 +93,5 @@ button{cursor:pointer}
 .session-box .btn{padding:6px 10px;font-size:12px}
 .empty-actions{margin-top:16px}
 .empty-state p b{color:var(--ink);font-weight:800}
+.btn.busy{opacity:.6;cursor:not-allowed;filter:grayscale(.35)}
+.btn-icon.spin{display:inline-block;animation:spin 1s linear infinite}
