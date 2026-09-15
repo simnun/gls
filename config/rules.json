@@ -23,7 +23,8 @@
         "restituzione",
         "reso al mittente",
         "ritorno al mittente"
-      ]
+      ],
+      "priority": 100
     },
     {
       "id": "out_for_delivery",
@@ -231,9 +232,15 @@
         "riconsegnata al mittente",
         "riconsegnato al mittente",
         "consegnata al mittente",
-        "consegnato al mittente"
+        "consegnato al mittente",
+        "traccia il reso con codice",
+        "restituito la spedizione al mittente",
+        "abbiamo restituito la spedizione",
+        "messo in restituzione",
+        "spedizione in restituzione"
       ],
-      "action": "Verificare motivo del rientro e stato ordine Shopify."
+      "action": "Verificare motivo del rientro e stato ordine Shopify.",
+      "priority": 100
     }
   ]
 }

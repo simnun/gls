@@ -93,6 +93,7 @@ class Classifier:
 
         best: Classification | None = None
         best_rank = 0
+        best_priority = -1
 
         for rule in self.rules:
             patterns = [normalize_text(p) for p in rule.get("patterns", [])]
@@ -119,10 +120,15 @@ class Classifier:
                 recommended_action=rule.get("action", ""),
                 matched_rule=rule.get("id"),
             )
+            # Gli esiti finali (consegnato, rientrato) hanno priorita' esplicita:
+            # sono conclusioni, non problemi da risolvere, e devono prevalere su
+            # una regola di anomalia anche se questa ha gravita' maggiore.
+            priority = int(rule.get("priority", 0))
             rank = SEVERITY_RANK.get(candidate.severity, 3)
-            if rank > best_rank:
+            if (priority, rank) > (best_priority, best_rank):
                 best = candidate
                 best_rank = rank
+                best_priority = priority
 
         if best is None:
             best = Classification(
