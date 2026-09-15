@@ -391,6 +391,13 @@ class AppHandler(BaseHTTPRequestHandler):
                     return self._json({"error": f"Impossibile aprire Chrome in incognito: {exc}"}, 500)
                 return self._json({"ok": True, "url": url})
 
+            if path == "/api/maintenance/reclassify":
+                # Riapplica le regole correnti allo storico. Serve dopo un
+                # cambio di regole: gli eventi conservano la classificazione
+                # del momento in cui sono stati letti.
+                result = ENGINE.reclassify_history()
+                return self._json(result)
+
             if path == "/api/sync":
                 if CONFIG.serverless:
                     result = ENGINE.run_sync()

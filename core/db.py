@@ -913,6 +913,46 @@ class Database:
             item["effective_severity"] = "CRITICAL" if item["has_inconsistency"] else item.get("severity", "WATCH")
             return item
 
+    def events_for_reclassification(self) -> list[dict[str, Any]]:
+        """Tutti gli eventi con quanto serve per riapplicare le regole."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, tracking_number, code, state, note, event_at, severity, category
+                   FROM events ORDER BY tracking_number,
+                   COALESCE(event_at, created_at) ASC, id ASC"""
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_event_classifications(self, aggiornamenti: list[dict[str, Any]]) -> int:
+        """Riscrive gravita' e categoria degli eventi, in una sola transazione."""
+        if not aggiornamenti:
+            return 0
+        with self.connect() as conn:
+            for a in aggiornamenti:
+                conn.execute(
+                    "UPDATE events SET severity=?, category=?, reason=? WHERE id=?",
+                    (a["severity"], a["category"], a.get("reason", ""), a["id"]),
+                )
+        return len(aggiornamenti)
+
+    def apply_shipment_classification(
+        self, tracking_number: str, severity: str, category: str,
+        reason: str, recommended_action: str, closed: bool,
+    ) -> None:
+        """Aggiorna la classificazione di una spedizione senza toccare altro.
+
+        Lavoro dell'operatore, note e stato pratica restano come sono: qui si
+        riscrive solo come il monitor legge lo stato GLS.
+        """
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE shipments
+                   SET severity=?, category=?, reason=?, recommended_action=?, closed=?
+                   WHERE tracking_number=?""",
+                (severity, category, reason, recommended_action, 1 if closed else 0,
+                 tracking_number),
+            )
+
     def reconcile_stock_cases(self, tracking_number: str) -> None:
         """Build/refresh stock episodes from the persisted GLS event history.
 
@@ -959,6 +999,23 @@ class Database:
 
             if current is not None:
                 episodes.append(current)
+
+            # Un esito finale chiude comunque la giacenza, anche se il singolo
+            # evento non risulta fra le categorie di uscita. Succede quando un
+            # evento e' stato registrato prima che le regole imparassero a
+            # riconoscerlo: la classificazione dell'evento e' una fotografia del
+            # momento, mentre la categoria della spedizione e' sempre attuale.
+            if episodes:
+                riga = conn.execute(
+                    "SELECT category FROM shipments WHERE tracking_number=?",
+                    (tracking_number,),
+                ).fetchone()
+                categoria = (riga["category"] or "").upper() if riga else ""
+                ultimo = episodes[-1]
+                if categoria in {"DELIVERED", "RETURN"} and ultimo.get("first_exit") is None:
+                    uscita = ultimo.get("final") or ultimo["entry"]
+                    if uscita is not ultimo["entry"]:
+                        ultimo["first_exit"] = uscita
 
             now = utcnow()
             for ep in episodes:

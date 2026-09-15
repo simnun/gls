@@ -439,6 +439,55 @@ class SyncEngine:
         finally:
             self.lock.release()
 
+    def reclassify_history(self) -> dict[str, Any]:
+        """Riapplica le regole correnti a tutto lo storico gia' registrato.
+
+        La classificazione di un evento e' la fotografia del momento in cui e'
+        stato letto: quando le regole imparano a riconoscere uno stato nuovo,
+        gli eventi vecchi restano com'erano. Da li' derivano incoerenze come una
+        giacenza che resta aperta su una spedizione gia' rientrata.
+
+        Il lavoro degli operatori non viene toccato: si riscrive solo come il
+        monitor legge lo stato GLS.
+        """
+        eventi = self.db.events_for_reclassification()
+        aggiornamenti: list[dict[str, Any]] = []
+        ultimo_per_tracking: dict[str, dict[str, Any]] = {}
+
+        for e in eventi:
+            classificazione = self.classifier.classify(
+                code=e.get("code"), state=e.get("state"), note=e.get("note"),
+                event_at=e.get("event_at"),
+            )
+            if (classificazione.category != (e.get("category") or "")
+                    or classificazione.severity != (e.get("severity") or "")):
+                aggiornamenti.append({
+                    "id": e["id"], "severity": classificazione.severity,
+                    "category": classificazione.category, "reason": classificazione.reason,
+                })
+            # Gli eventi arrivano ordinati: l'ultimo visto e' quello corrente.
+            ultimo_per_tracking[e["tracking_number"]] = {"evento": e, "classe": classificazione}
+
+        eventi_aggiornati = self.db.update_event_classifications(aggiornamenti)
+
+        spedizioni_aggiornate = 0
+        for tracking, dati in ultimo_per_tracking.items():
+            classe = dati["classe"]
+            self.db.apply_shipment_classification(
+                tracking, classe.severity, classe.category, classe.reason,
+                classe.recommended_action, classe.category in {"DELIVERED", "RETURN"},
+            )
+            self.db.reconcile_stock_cases(tracking)
+            self.db.reconcile_inconsistencies(tracking)
+            spedizioni_aggiornate += 1
+
+        return {
+            "ok": True,
+            "eventi_esaminati": len(eventi),
+            "eventi_riclassificati": eventi_aggiornati,
+            "spedizioni_aggiornate": spedizioni_aggiornate,
+        }
+
     def _shopify_since(self) -> str | None:
         """Da quando ricercare su Shopify.
 
