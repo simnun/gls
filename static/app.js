@@ -341,11 +341,14 @@ async function loadDashboard({quiet = false} = {}) {
   try {
     const data = await api('/api/dashboard?include_closed=true');
     state.data = data;
-    await loadInconsistencies({quiet:true});
+    // Si disegna subito con i dati appena arrivati. Le incongruenze si caricano
+    // dopo, senza bloccare: se quella chiamata fosse lenta o fallisse, prima
+    // restava tutto vuoto e i contatori a zero pur avendo i dati in mano.
     renderSession();
     renderKpis();
     renderConnection();
     renderTable();
+    loadInconsistencies({quiet:true}).then(() => { renderKpis(); renderTable(); });
     if (data.sync_running) startSyncPolling();
   } catch (err) {
     if (!quiet) showNotice(`Errore caricamento dashboard: ${err.message}`);

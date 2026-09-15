@@ -1309,9 +1309,17 @@ class Database:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def reconcile_all_inconsistencies(self) -> int:
+    def reconcile_all_inconsistencies(self, only_open: bool = True) -> int:
+        """Ricontrolla le incongruenze di tutte le spedizioni.
+
+        E' un'operazione pesante: ogni spedizione richiede una decina di query.
+        Va usata nelle manutenzioni, non nelle rotte di lettura, dove basta
+        `list_inconsistencies`: la sincronizzazione riconcilia gia' ogni
+        spedizione che tocca e ogni azione operatore la propria.
+        """
+        filtro = " WHERE closed=0" if only_open else ""
         with self.connect() as conn:
-            rows = conn.execute("SELECT tracking_number FROM shipments").fetchall()
+            rows = conn.execute(f"SELECT tracking_number FROM shipments{filtro}").fetchall()
         for row in rows:
             self.reconcile_inconsistencies(row["tracking_number"])
         return len(rows)
@@ -1334,7 +1342,8 @@ class Database:
             return [dict(r) for r in rows]
 
     def stock_history(self) -> dict[str, Any]:
-        self.reconcile_all_stock_cases()
+        # Come sopra: la ricostruzione delle giacenze avviene durante la
+        # sincronizzazione, non a ogni apertura dello storico.
         with self.connect() as conn:
             rows = conn.execute(
                 """

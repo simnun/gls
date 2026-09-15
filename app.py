@@ -286,11 +286,14 @@ class AppHandler(BaseHTTPRequestHandler):
             return self._json(item)
 
         if path == "/api/inconsistencies":
-            DB.reconcile_all_inconsistencies()
+            # Niente riconciliazione qui: la fa gia' la sincronizzazione su ogni
+            # spedizione che tocca, e ogni azione operatore sulla propria. Rifarla
+            # per tutte a ogni apertura di pagina significa migliaia di query verso
+            # il database: in locale su SQLite non si notava, in rete la pagina non
+            # arrivava mai a caricarsi.
             return self._json({"items": DB.list_inconsistencies(active_only=True)})
 
         if path == "/api/inconsistencies/export.xlsx":
-            DB.reconcile_all_inconsistencies()
             items = DB.list_inconsistencies(active_only=True)
             headers = [
                 "Priorita", "Codice incongruenza", "Ordine", "Tracking GLS", "Cliente", "Telefono",
