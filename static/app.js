@@ -75,6 +75,16 @@ function dateKeyFromDate(d) {
 }
 
 
+function prossimoGiornoLavorativo(da = new Date()) {
+  // Prima data utile dopo oggi, escludendo sabato e domenica: una riconsegna
+  // chiesta per il fine settimana non verrebbe comunque eseguita.
+  const d = new Date(da.getFullYear(), da.getMonth(), da.getDate());
+  do {
+    d.setDate(d.getDate() + 1);
+  } while (d.getDay() === 0 || d.getDay() === 6);
+  return dateKeyFromDate(d);
+}
+
 function phoneDigits(value) {
   return String(value || '').replace(/\D+/g, '');
 }
@@ -643,8 +653,8 @@ function drawerHtml(item) {
       <div class="release-warning">La richiesta viene registrata subito. Se il tracking resta fermo, il monitor confronterà automaticamente istruzione e movimenti GLS e segnalerà eventuali incongruenze.</div>
       <div class="release-grid">
         <label class="field-span-2">Istruzione<select id="releaseType"><option value="1">Ritenta consegna allo stesso indirizzo</option><option value="2">Consegna a un indirizzo diverso</option><option value="3">Ritorno al mittente</option><option value="7">Ritiro del destinatario presso la sede GLS</option><option value="8">Consegna parziale e rientro</option><option value="4">Distruzione</option><option value="9">Consegna parziale e distruzione</option></select></label>
-        <label>Data riconsegna <input id="releaseDate" type="date"></label>
-        <label id="expensePayerField">Spese riconsegna<select id="releaseExpensePayer"><option value="">Scegli…</option><option value="sender">A carico mittente</option><option value="recipient">A carico destinatario</option></select></label>
+        <label>Data riconsegna <input id="releaseDate" type="date" value="${prossimoGiornoLavorativo()}" min="${dateKeyFromDate(new Date())}"></label>
+        <label id="expensePayerField">Spese riconsegna<select id="releaseExpensePayer"><option value="sender" selected>A carico mittente</option><option value="recipient">A carico destinatario</option><option value="">Non specificato</option></select></label>
         <label>Telefono destinatario <input id="releasePhone" type="tel" value="${esc(localItalianPhone(item.customer_phone || ''))}" maxlength="15"></label>
         <label class="check-field"><input id="releasePhoneNotice" type="checkbox" checked> Preavviso telefonico</label>
         ${item.is_cod ? `<label class="check-field"><input id="releaseCancelCod" type="checkbox"> Annulla contrassegno</label>` : ''}
