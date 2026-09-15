@@ -56,5 +56,40 @@ class OperatorActionTests(unittest.TestCase):
         self.assertEqual(item['last_operator_name'], 'Anna')
 
 
+class NotaPrendeInCaricoTests(unittest.TestCase):
+    """Scrivere una nota significa aver preso in mano la pratica.
+
+    Era l'unica azione che lasciava lo stato su NEW: la pratica restava fra
+    quelle da verificare anche dopo che un operatore l'aveva annotata.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self.tmp.name) / 't.sqlite3')
+        self.db.upsert_shipment({
+            'tracking_number': 'NOTA1', 'gls_status': 'Indirizzo errato',
+            'category': 'ADDRESS_ERROR', 'severity': 'CRITICAL',
+        })
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def annota(self):
+        self.db.add_operator_action(
+            tracking_number='NOTA1', action_type='NOTE', action_label='Nota operativa',
+            note='Quando va in giacenza inserire il civico 31',
+            operator_name='Simone', workflow_status='IN_PROGRESS',
+        )
+
+    def test_la_nota_porta_in_lavorazione(self):
+        self.annota()
+        self.assertEqual(self.db.get_shipment('NOTA1')['workflow_status'], 'IN_PROGRESS')
+
+    def test_la_nota_resta_leggibile_nello_storico(self):
+        self.annota()
+        note = [a['note'] for a in self.db.get_shipment('NOTA1')['operator_actions']]
+        self.assertIn('Quando va in giacenza inserire il civico 31', note)
+
+
 if __name__ == '__main__':
     unittest.main()

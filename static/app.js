@@ -667,7 +667,10 @@ function drawerHtml(item) {
   // cosa era stato raccolto: serve per compilare lo svincolo senza cercarlo
   // nella cronologia.
   const gestione = statoGestione(item);
-  const notaOperatore = (item.operator_note || '').trim();
+  // La nota puo' stare nel campo della pratica oppure in un'azione registrata:
+  // all'operatore serve vederla comunque, da qualunque strada sia arrivata.
+  const notaAzione = (actions.find(a => (a.note || '').trim()) || {}).note || '';
+  const notaOperatore = (item.operator_note || '').trim() || notaAzione.trim();
   const internalBanner = gestione ? `
     <div class="internal-banner handled ${gestione.classe}">
       <div class="icon">${gestione.icona}</div>

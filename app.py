@@ -483,7 +483,10 @@ class AppHandler(BaseHTTPRequestHandler):
                     "RELEASE_REQUESTED": ("SVINCOLO Ritenta consegna", "IN_PROGRESS"),
                     "STOCK_MANUAL_HANDLED": ("Giacenza gestita esternamente", "IN_PROGRESS"),
                     "DELIVERY_RESCHEDULED": ("SVINCOLO Ritorno al mittente", "IN_PROGRESS"),
-                    "NOTE": ("Nota operativa", None),
+                    # Scrivere una nota e' prendere in carico la pratica, esattamente
+                    # come contattare il cliente o la sede GLS: era l'unica azione a
+                    # lasciare la pratica fra quelle ancora da verificare.
+                    "NOTE": ("Nota operativa", "IN_PROGRESS"),
                     "RESOLVED_MANUALLY": ("Pratica risolta manualmente", "RESOLVED"),
                 }
                 if action_type not in actions:
