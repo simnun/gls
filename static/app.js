@@ -456,7 +456,6 @@ function renderTable() {
   };
   $('#tableTitle').textContent = titles[state.view] || 'Spedizioni GLS';
   const total = (state.data?.shipments || []).filter(x => !x.closed).length;
-  $('#tableMeta').textContent = `${rows.length} nella vista corrente · ${total} GLS attive monitorate`;
   const last = state.data?.last_sync;
   if (last?.finished_at) {
     const skipped = Number(last.skipped_closed || 0);
@@ -487,10 +486,32 @@ function renderTable() {
   }).join('');
   empty.classList.toggle('hidden', rows.length !== 0);
   if (rows.length === 0) renderEmptyState(empty, total);
+  $('#tableMeta').textContent = filtriAttivi()
+    ? `${rows.length} con i filtri attivi · ${total} GLS attive monitorate`
+    : `${rows.length} nella vista corrente · ${total} GLS attive monitorate`;
   $$('[data-open]').forEach(btn => btn.addEventListener('click', () => openDrawer(btn.dataset.open)));
 }
 
+function filtriAttivi() {
+  return Boolean(state.severity || state.workflow || state.codOnly || state.search
+    || state.dateFrom || state.dateTo);
+}
+
 function renderEmptyState(empty, monitored) {
+  // Distinzione essenziale: la coda e' davvero vuota, oppure ci sono righe che
+  // i filtri stanno nascondendo? Senza dirlo, sembra che i dati siano spariti.
+  if (filtriAttivi()) {
+    empty.innerHTML = `<div class="empty-icon">⌕</div>
+      <h3>Nessun risultato con i filtri attivi</h3>
+      <p>Ci sono <b>${monitored}</b> spedizioni monitorate, ma nessuna corrisponde ai filtri impostati.</p>
+      <div class="empty-actions"><button class="btn secondary" type="button" data-clear-filters>Azzera i filtri</button></div>`;
+    empty.querySelector('[data-clear-filters]')?.addEventListener('click', resetFilters);
+    return;
+  }
+  return renderEmptyStateVuota(empty, monitored);
+}
+
+function renderEmptyStateVuota(empty, monitored) {
   // Una vista vuota non significa "nessuna spedizione": le code operative
   // mostrano solo cio' che richiede attenzione. Senza distinguere i due casi
   // sembra che la sincronizzazione non abbia caricato nulla.
@@ -943,7 +964,19 @@ async function renderRules() {
   } catch (err) { showToast(err.message, true); }
 }
 
+function clearQueueFilters() {
+  // Gravita' e lavorazione sono affinamenti dentro una coda, non fra code.
+  // Portandoli da una scheda all'altra si ottengono combinazioni impossibili:
+  // "Da verificare" contiene solo massima e alta, quindi con il filtro
+  // "Osservazione" attivo resterebbe sempre vuota senza spiegazione.
+  state.severity = '';
+  state.workflow = '';
+  const sev = $('#severityFilter'); if (sev) sev.value = '';
+  const wf = $('#workflowFilter'); if (wf) wf.value = '';
+}
+
 function switchView(view) {
+  if (state.view !== view) clearQueueFilters();
   state.view = view;
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   $('#rulesPanel').classList.add('hidden');
