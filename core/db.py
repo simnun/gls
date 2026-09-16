@@ -818,7 +818,8 @@ class Database:
                        COALESCE(ic.inconsistency_count,0) AS inconsistency_count,
                        COALESCE(ic.inconsistency_titles,'') AS inconsistency_titles,
                        COALESCE(gi.open_stock_cases,0) AS open_stock_cases,
-                       COALESCE(sv.release_count,0) AS release_count
+                       COALESCE(sv.release_count,0) AS release_count,
+                       COALESCE(sv.release_failed_count,0) AS release_failed_count
                 FROM shipments s
                 LEFT JOIN (
                     SELECT tracking_number, COUNT(*) AS inconsistency_count,
@@ -835,8 +836,10 @@ class Database:
                     GROUP BY tracking_number
                 ) gi ON gi.tracking_number=s.tracking_number
                 LEFT JOIN (
-                    SELECT tracking_number, COUNT(*) AS release_count
-                    FROM gls_release_requests WHERE gls_success=1
+                    SELECT tracking_number,
+                           SUM(CASE WHEN gls_success=1 THEN 1 ELSE 0 END) AS release_count,
+                           SUM(CASE WHEN gls_success=1 THEN 0 ELSE 1 END) AS release_failed_count
+                    FROM gls_release_requests
                     GROUP BY tracking_number
                 ) sv ON sv.tracking_number=s.tracking_number
                 WHERE {where}

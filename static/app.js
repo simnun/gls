@@ -112,12 +112,23 @@ function statoGestione(row) {
   const haLavoro = Boolean((row.operator_note || '').trim() || row.last_operator_action);
   if (!inLavorazione || !haLavoro) return null;
 
+  // Nel dettaglio gli svincoli stanno dentro le giacenze, nell'elenco arrivano
+  // come contatore aggregato: leggiamo entrambe le forme.
+  const svincoli = (row.stock_cases || []).flatMap(sc => sc.release_requests || []);
   const svincolato = Number(row.release_count || 0) > 0
-    || (row.releases || []).some(r => Number(r.gls_success) === 1);
+    || svincoli.some(r => Number(r.gls_success) === 1);
+  const rifiutato = !svincolato
+    && (svincoli.length > 0 || Number(row.release_failed_count || 0) > 0);
   const giacenzaAperta = Number(row.open_stock_cases || 0) > 0
     || (row.stock_cases || []).some(sc => sc.status === 'OPEN')
     || row.category === 'STORAGE';
 
+  if (rifiutato) return {
+    classe: 'rifiutato', icona: '✕', testo: 'Svincolo respinto',
+    dettaglio: (svincoli[0] && svincoli[0].gls_result)
+      ? `GLS non ha accettato l\u2019istruzione: ${svincoli[0].gls_result}`
+      : 'GLS non ha accettato l\u2019istruzione di svincolo: va ripetuta o gestita fuori piattaforma.',
+  };
   if (svincolato) return {
     classe: 'inviato', icona: '✓', testo: 'Svincolo inviato',
     dettaglio: 'Lo svincolo e\u2019 gia\u2019 stato inviato a GLS: si attende il riscontro.',

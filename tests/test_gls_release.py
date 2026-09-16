@@ -52,3 +52,36 @@ class ReleaseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RifiutoGLSTests(unittest.TestCase):
+    """GLS risponde con <DescrizioneErrore> quando rifiuta l'intera chiamata."""
+
+    RIFIUTO = (b'<?xml version="1.0" encoding="utf-8"?>\r\n'
+               b'<DescrizioneErrore>Funzionalit\xc3\xa0 non abilitata. '
+               b'Contattare la sede di competenza.</DescrizioneErrore>')
+
+    def test_svincolo_rifiutato_non_e_un_successo(self):
+        gls = FakeGLS()
+        gls._post_form_bytes = lambda url, form: self.RIFIUTO
+        result = gls.release_shipment_stock("NI123", {
+            "release_type": "1", "delivery_date": "2026-09-17",
+            "expense_payer": "sender"})
+        self.assertFalse(result["success"])
+        self.assertIn("non abilitata", result["result"])
+        # All'operatore va detto anche cosa controllare.
+        self.assertIn("filiale GLS", result["result"])
+
+    def test_diagnostica_non_dichiara_ok_su_un_rifiuto(self):
+        gls = FakeGLS()
+        gls.config.gls_tracking_configured = True
+        gls.list_shipments_raw = lambda: self.RIFIUTO.decode("utf-8")
+        diagnosi = gls.diagnostics()
+        self.assertFalse(diagnosi["list_sped_ok"])
+        self.assertIn("non abilitata", diagnosi["list_sped_error"])
+
+    def test_diagnostica_ok_quando_arrivano_spedizioni(self):
+        gls = FakeGLS()
+        gls.config.gls_tracking_configured = True
+        gls.list_shipments_raw = lambda: "<ListParcel><Parcel><Data>16/09/2026</Data></Parcel></ListParcel>"
+        self.assertTrue(gls.diagnostics()["list_sped_ok"])

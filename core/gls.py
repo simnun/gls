@@ -17,6 +17,30 @@ from xml.etree import ElementTree as ET
 from .timezones import ROME  # noqa: E402
 
 
+def errore_dichiarato(raw: str) -> str:
+    """Restituisce il testo di <DescrizioneErrore> se GLS ha rifiutato la chiamata."""
+    if not raw:
+        return ""
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        trovato = re.search(r"<DescrizioneErrore>(.*?)</DescrizioneErrore>", raw, flags=re.I | re.S)
+        return html.unescape(trovato.group(1)).strip() if trovato else ""
+    for node in root.iter():
+        if strip_ns(node.tag).lower() == "descrizioneerrore":
+            return (node.text or "").strip()
+    return ""
+
+
+def spiega_rifiuto(messaggio: str) -> str:
+    """Aggiunge al messaggio di GLS l'indicazione di cosa controllare."""
+    testo = (messaggio or "").strip()
+    if "non abilitata" in testo.lower():
+        return (f"{testo} GLS ha respinto le credenziali del web service: la password "
+                "del web service e' distinta da quella del portale e va riabilitata "
+                "dalla filiale GLS.")
+    return testo
+
 class GLSError(RuntimeError):
     pass
 
@@ -289,7 +313,7 @@ class GLSClient:
                     success = value.lower() == "ok"
                     break
                 if tag == "descrizioneerrore" and value and not result_text:
-                    result_text = value
+                    result_text = spiega_rifiuto(value)
         except ET.ParseError:
             pass
         if not result_text:
@@ -591,8 +615,11 @@ class GLSClient:
         if self.config.gls_list_configured:
             try:
                 raw = self.list_shipments_raw()
-                result["list_sped_ok"] = bool(raw.strip())
+                rifiuto = errore_dichiarato(raw)
+                result["list_sped_ok"] = bool(raw.strip()) and not rifiuto
                 result["list_sped_preview"] = re.sub(r"\s+", " ", raw)[:220]
+                if rifiuto:
+                    result["list_sped_error"] = spiega_rifiuto(rifiuto)
             except Exception as exc:
                 result["list_sped_ok"] = False
                 result["list_sped_error"] = str(exc)

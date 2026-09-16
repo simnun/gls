@@ -109,6 +109,7 @@ button{cursor:pointer}
 .handled-chip.gestita{background:#eef2f6;color:#475467;border-color:#dde3ea}
 .handled-chip.da-svincolare{background:var(--warning-bg);color:var(--warning);border-color:#fedf89}
 .handled-chip.inviato{background:var(--info-bg);color:var(--info);border-color:#b2ddff}
+.handled-chip.rifiutato{background:var(--critical-bg);color:var(--critical);border-color:#fecdca}
 .internal-banner.handled.da-svincolare{background:var(--warning-bg);border-color:#fedf89}
 .internal-banner.handled.da-svincolare .icon{background:#fedf89;color:var(--warning)}
 .internal-banner.handled.da-svincolare strong{color:#93370d}
