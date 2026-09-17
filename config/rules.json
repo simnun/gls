@@ -45,7 +45,9 @@
         "primo giorno lavorativo disponibile"
       ],
       "exclude_patterns": [
-        "contrassegno non disponibile"
+        "contrassegno non disponibile",
+        "non siamo riusciti a raggiungerti",
+        "primo tentativo di consegna"
       ],
       "action": "Nessuna azione salvo persistenza oltre la data prevista."
     },
@@ -117,6 +119,21 @@
       "escalate_to": "WATCH",
       "second_escalate_after_hours": 48,
       "second_escalate_to": "WARNING"
+    },
+    {
+      "id": "first_attempt_failed",
+      "severity": "WATCH",
+      "category": "DELIVERY_RETRY",
+      "patterns": [
+        "non siamo riusciti a raggiungerti",
+        "primo tentativo di consegna",
+        "ritenteremo la consegna"
+      ],
+      "action": "Nessuna azione immediata: GLS ritenta da sola il primo giorno lavorativo. Tenere d'occhio che il secondo tentativo vada a buon fine.",
+      "escalate_after_business_days": 1,
+      "escalate_to": "WARNING",
+      "second_escalate_after_business_days": 2,
+      "second_escalate_to": "CRITICAL"
     },
     {
       "id": "cod_unavailable",

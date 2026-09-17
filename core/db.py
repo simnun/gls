@@ -823,6 +823,67 @@ class Database:
                 ripristinate.append({"tracking_number": tracking, "workflow_status": voluto})
         return ripristinate
 
+    def elimina_azione_operatore(self, tracking_number: str, action_id: int) -> dict[str, Any]:
+        """Cancella l'ultima operazione registrata da un operatore.
+
+        Serve per le azioni fatte per errore: tolta quella, la pratica torna a
+        valere per quello che dice lo storico rimasto, cioe' l'ultimo stato GLS
+        se non resta nessun intervento.
+        """
+        with self.connect() as conn:
+            azione = conn.execute(
+                "SELECT * FROM operator_actions WHERE id=? AND tracking_number=?",
+                (action_id, tracking_number),
+            ).fetchone()
+            if not azione:
+                raise ValueError("Operazione non trovata")
+            ultima = conn.execute(
+                """SELECT id FROM operator_actions WHERE tracking_number=?
+                   ORDER BY created_at DESC, id DESC LIMIT 1""",
+                (tracking_number,),
+            ).fetchone()
+            if not ultima or int(ultima["id"]) != int(action_id):
+                raise ValueError("Si puo' cancellare solo l'ultima operazione registrata")
+
+            conn.execute("DELETE FROM operator_actions WHERE id=?", (action_id,))
+
+            # Lo stato della pratica torna a essere quello che dice cio' che resta.
+            rimaste = conn.execute(
+                """SELECT action_type, action_label, operator_name, note, created_at
+                   FROM operator_actions WHERE tracking_number=?
+                   ORDER BY created_at DESC, id DESC LIMIT 20""",
+                (tracking_number,),
+            ).fetchall()
+            umane = [a for a in rimaste
+                     if (a["operator_name"] or "").strip().lower() not in {"", "sistema"}]
+            stato = "NEW"
+            if umane:
+                prima = umane[0]
+                if prima["action_type"] == "WORKFLOW":
+                    trovato = re.search(r"Stato pratica:\s*\w+\s*→\s*(\w+)", prima["action_label"] or "")
+                    if trovato and trovato.group(1) in WORKFLOW_ALLOWED:
+                        stato = trovato.group(1)
+                else:
+                    stato = "IN_PROGRESS"
+
+            ultima_umana = umane[0] if umane else None
+            conn.execute(
+                """UPDATE shipments
+                   SET workflow_status=?, workflow_updated_at=?,
+                       manual_closed_revision=CASE WHEN ? IN ('RESOLVED','IGNORED')
+                                                   THEN manual_closed_revision ELSE NULL END,
+                       last_operator_action=?, last_operator_action_at=?, last_operator_name=?
+                   WHERE tracking_number=?""",
+                (stato, utcnow(), stato,
+                 ultima_umana["action_label"] if ultima_umana else None,
+                 ultima_umana["created_at"] if ultima_umana else None,
+                 ultima_umana["operator_name"] if ultima_umana else None,
+                 tracking_number),
+            )
+            return {"workflow_status": stato,
+                    "azioni_rimaste": len(rimaste),
+                    "eliminata": azione["action_label"]}
+
     def segna_novita_gls(self, tracking_number: str, event_at: str | None) -> None:
         """Segnala che GLS ha aggiornato una pratica gia' presa in carico.
 

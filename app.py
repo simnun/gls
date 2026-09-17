@@ -509,6 +509,18 @@ class AppHandler(BaseHTTPRequestHandler):
                     "release_label": release_label,
                 }, status)
 
+            if path.startswith("/api/shipment/") and path.endswith("/annulla-azione"):
+                # Cancella l'ultima operazione registrata da un operatore, per le
+                # volte in cui e' stata segnata per errore: la pratica torna a
+                # valere per quello che dice lo storico rimasto.
+                tracking = unquote(path[len("/api/shipment/"):-len("/annulla-azione")]).strip("/")
+                body = self._read_json()
+                try:
+                    esito = DB.elimina_azione_operatore(tracking, int(body.get("action_id") or 0))
+                except (ValueError, TypeError) as exc:
+                    return self._json({"error": str(exc)}, 400)
+                return self._json({"ok": True, **esito})
+
             if path.startswith("/api/shipment/") and path.endswith("/action"):
                 tracking = unquote(path[len("/api/shipment/"):-len("/action")]).strip("/")
                 body = self._read_json()

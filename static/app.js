@@ -102,8 +102,17 @@ function orderNumeric(value) {
 // cui l'operatore raccoglie le informazioni oggi e svincola domani.
 // Il collo e' in viaggio verso il cliente: nessuna azione, solo da seguire.
 const CATEGORIE_IN_CONSEGNA = ['OUT_FOR_DELIVERY', 'SCHEDULED', 'IN_TRANSIT', 'CORRESPONDENT'];
-const CATEGORIE_VERSO_GIACENZA = ['ADDRESS_ERROR', 'ABSENT', 'REFUSED', 'ACTION_REQUIRED',
+const CATEGORIE_VERSO_GIACENZA = ['ADDRESS_ERROR', 'ABSENT', 'REFUSED', 'ACTION_REQUIRED', 'DELIVERY_RETRY',
   'COD_ISSUE', 'DELIVERY_FAILURE', 'DAMAGE_OR_LOSS'];
+
+function daVerificare(row) {
+  // Una pratica entra in DA VERIFICARE solo finche' nessuno l'ha presa in mano:
+  // se un operatore ci sta lavorando il compito e' gia' assegnato, e rimetterla
+  // in coda non dice a nessuno cosa fare.
+  if (!row || row.closed || row.workflow_status !== 'NEW') return false;
+  const gravita = row.effective_severity || row.severity;
+  return Boolean(row.has_inconsistency) || ['CRITICAL', 'WARNING'].includes(gravita);
+}
 
 function statoGestione(row) {
   // Dice a colpo d'occhio se una pratica e' gia' stata lavorata e cosa manca.
@@ -470,7 +479,7 @@ function renderConnection() {
 
 function renderKpis() {
   const rows = applyDateFilter([...(state.data?.shipments || [])]);
-  const actionable = rows.filter(x => ((x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)) || (!x.closed && ['CRITICAL','WARNING'].includes(x.effective_severity || x.severity) && x.workflow_status === 'NEW')));
+  const actionable = rows.filter(daVerificare);
   const watch = rows.filter(x => !x.closed && (x.effective_severity || x.severity) === 'WATCH').length;
   const working = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status)).length;
   const delivered = rows.filter(x => x.category === 'DELIVERED').length;
@@ -491,7 +500,7 @@ function renderKpis() {
 
 function filteredShipments() {
   let rows = applyDateFilter([...(state.data?.shipments || [])]);
-  if (state.view === 'action') rows = rows.filter(x => ((x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)) || (!x.closed && x.workflow_status === 'NEW' && ['CRITICAL','WARNING'].includes(x.effective_severity || x.severity))));
+  if (state.view === 'action') rows = rows.filter(x => daVerificare(x));
   if (state.view === 'working') rows = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status));
   if (state.view === 'active') rows = rows.filter(x => !x.closed);
   if (state.view === 'delivered') rows = rows.filter(x => x.category === 'DELIVERED');
@@ -763,9 +772,13 @@ function drawerHtml(item) {
       <div class="release-actions"><button id="sendReleaseBtn" class="btn primary">Invia istruzione a GLS</button><button class="btn secondary quick-action-inline" data-action="STOCK_MANUAL_HANDLED">Registra gestione fatta fuori dal tool</button></div>
     </div>` : '';
 
+  // La croce compare solo sull'ultima operazione registrata: si torna indietro
+  // un passo per volta, senza poter riscrivere lo storico a meta'.
+  const ultimaAzioneId = actions.length ? actions[0].id : null;
+
   const combined = [
     ...events.map(ev => ({when: ev.event_at || ev.created_at, source:'GLS', severity:ev.severity || 'WATCH', title:ev.state || 'Evento GLS', note:ev.note || '', meta:[ev.location, ev.code ? `codice ${ev.code}` : ''].filter(Boolean).join(' · ')})),
-    ...actions.map(a => ({when:a.created_at, source:'TEAM', severity:'TEAM', title:a.action_label || a.action_type, note:a.note || '', meta:a.operator_name || 'Operatore'})),
+    ...actions.map(a => ({when:a.created_at, source:'TEAM', severity:'TEAM', title:a.action_label || a.action_type, note:a.note || '', meta:a.operator_name || 'Operatore', actionId:a.id})),
   ].sort((a,b) => (new Date(b.when || 0).getTime()||0) - (new Date(a.when || 0).getTime()||0));
 
   return `
@@ -804,7 +817,7 @@ function drawerHtml(item) {
     <div class="section-box"><div class="section-title-row"><h3>Stato pratica interno</h3><span>puoi lasciarla aperta oppure chiuderla manualmente</span></div><div class="workflow-buttons"><button class="workflow-btn ${item.workflow_status==='IN_PROGRESS'?'active':''}" data-workflow="IN_PROGRESS">IN LAVORAZIONE</button><button class="workflow-btn ${['RESOLVED','IGNORED'].includes(item.workflow_status)?'active':''}" data-workflow="RESOLVED">CHIUSA</button></div><textarea id="operatorNote" class="operator-note" placeholder="Nota pratica generale…">${esc(item.operator_note || '')}</textarea><div class="link-row"><button id="saveWorkflowBtn" class="btn primary">Salva pratica</button></div></div>
 
     <div class="section-box"><div class="section-title-row"><h3>Storico completo</h3><span>GLS + attività operatori · ${combined.length} eventi</span></div><div class="timeline combined-timeline">
-      ${combined.length ? combined.map(e => `<div class="timeline-item ${e.source==='TEAM'?'team':esc(e.severity)}"><div class="timeline-time"><span class="source-badge ${e.source==='TEAM'?'team':'gls'}">${e.source}</span> ${esc(formatDate(e.when))}${e.meta ? ` · ${esc(e.meta)}` : ''}</div><div class="timeline-state">${esc(e.title)}</div>${e.note ? `<div class="timeline-note">${esc(e.note)}</div>` : ''}</div>`).join('') : '<div class="muted">Nessuno storico disponibile.</div>'}
+      ${combined.length ? combined.map(e => `<div class="timeline-item ${e.source==='TEAM'?'team':esc(e.severity)}">${e.actionId && e.actionId === ultimaAzioneId ? `<button class="undo-action" type="button" data-undo-action="${e.actionId}" title="Cancella questa operazione: \u00e8 l\u2019ultima registrata da un operatore">\u00d7</button>` : ''}<div class="timeline-time"><span class="source-badge ${e.source==='TEAM'?'team':'gls'}">${e.source}</span> ${esc(formatDate(e.when))}${e.meta ? ` · ${esc(e.meta)}` : ''}</div><div class="timeline-state">${esc(e.title)}</div>${e.note ? `<div class="timeline-note">${esc(e.note)}</div>` : ''}</div>`).join('') : '<div class="muted">Nessuno storico disponibile.</div>'}
     </div></div>
     ${classificationBox}`;
 }
@@ -829,6 +842,23 @@ function bindDrawer(item) {
       showToast('Tracking GLS aperto in Chrome Incognito');
     } catch (err) { showToast(err.message, true); }
   });
+
+  $$('[data-undo-action]').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Cancellare questa operazione dallo storico?\n\nLa pratica torner\u00e0 a valere per quello che dice lo storico rimasto.')) return;
+    btn.disabled = true;
+    try {
+      const esito = await api(`/api/shipment/${encodeURIComponent(item.tracking_number)}/annulla-azione`, {
+        method: 'POST',
+        body: JSON.stringify({action_id: Number(btn.dataset.undoAction)}),
+      });
+      showToast(`Operazione cancellata · pratica ${workflowLabels[esito.workflow_status] || esito.workflow_status}`);
+      await loadDashboard({quiet:true});
+      await openDrawer(item.tracking_number);
+    } catch (err) {
+      showToast(err.message, true);
+      btn.disabled = false;
+    }
+  }));
 
   $$('[data-action]').forEach(btn => btn.addEventListener('click', async () => {
     const operatorName = getOperatorName(true);
