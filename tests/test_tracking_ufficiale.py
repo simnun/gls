@@ -123,3 +123,37 @@ class DoppioniStoricoTests(unittest.TestCase):
         # senza violare il vincolo di unicita'.
         self.db.insert_event(self.evento("66", "hash-ufficiale"))
         self.assertEqual(self.conta(), 1)
+
+
+# Due scansioni nello stesso minuto: GLS data al minuto, quindi l'orario da
+# solo non dice quale sia arrivata dopo. Le pubblica pero' dalla piu' recente.
+XML_STESSO_MINUTO = """<?xml version="1.0" encoding="ISO-8859-1" ?><ELENCO><SPEDIZIONE>
+<NumSped><![CDATA[665031172]]></NumSped>
+<StatoSpedizione><![CDATA[Consegnato]]></StatoSpedizione>
+<TRACKING>
+<Data><![CDATA[17/09/26]]></Data><Ora><![CDATA[15:07]]></Ora>
+<Luogo><![CDATA[Genova]]></Luogo><Stato><![CDATA[Consegnata.]]></Stato>
+<Note><![CDATA[Pappalardo Chiara]]></Note><Codice><![CDATA[906]]></Codice>
+<Data><![CDATA[17/09/26]]></Data><Ora><![CDATA[15:07]]></Ora>
+<Luogo><![CDATA[Molassana New]]></Luogo>
+<Stato><![CDATA[Consegna prevista nel corso della giornata odierna.]]></Stato>
+<Note><![CDATA[]]></Note><Codice><![CDATA[905]]></Codice>
+<Data><![CDATA[16/09/26]]></Data><Ora><![CDATA[12:21]]></Ora>
+<Luogo><![CDATA[Molassana New]]></Luogo>
+<Stato><![CDATA[Spedizione in giacenza presso la sede GLS]]></Stato>
+<Note><![CDATA[]]></Note><Codice><![CDATA[66]]></Codice>
+</TRACKING></SPEDIZIONE></ELENCO>"""
+
+
+class StessoMinutoTests(unittest.TestCase):
+    def setUp(self):
+        self.parsed = GLSClient.parse_tracking_xml(XML_STESSO_MINUTO, "NI665031172")
+
+    def test_vince_la_scansione_che_gls_pubblica_per_prima(self):
+        corrente = self.parsed["current_event"]
+        self.assertEqual(corrente["code"], "906")
+        self.assertEqual(corrente["state"], "Consegnata.")
+
+    def test_l_ordine_cronologico_resta_coerente(self):
+        codici = [e["code"] for e in self.parsed["events"]]
+        self.assertEqual(codici, ["66", "905", "906"])

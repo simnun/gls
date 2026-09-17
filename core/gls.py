@@ -66,6 +66,27 @@ def numero_senza_sede(tracking_number: str, sede: str = "") -> str:
     return re.sub(r"^[A-Za-z]+(?=\d)", "", numero)
 
 
+def ordina_cronologicamente(elenco: list[dict[str, Any]]) -> None:
+    """Ordina dal piu' vecchio al piu' recente.
+
+    GLS data gli eventi al minuto, quindi due scansioni dello stesso
+    minuto ("in consegna" e "consegnata") arrivano indistinguibili. Ma li
+    pubblica dal piu' recente al piu' vecchio: a parita' di orario vale
+    quell'ordine, altrimenti l'ultimo stato sarebbe deciso dal caso.
+    """
+    def chiave(coppia):
+        posizione, evento = coppia
+        testo = evento.get("event_at") or ""
+        try:
+            momento = datetime.fromisoformat(testo)
+        except Exception:
+            momento = datetime.min.replace(tzinfo=ROME)
+        return (momento, -posizione)
+
+    ordinati = [e for _, e in sorted(enumerate(elenco), key=chiave)]
+    elenco[:] = ordinati
+
+
 def normalize_event_at(date_text: str, time_text: str) -> str | None:
     raw = " ".join(x.strip() for x in [date_text or "", time_text or ""] if x and x.strip())
     if not raw:
@@ -453,13 +474,7 @@ class GLSClient:
             if "cerca la tua spedizione" in plain.lower():
                 raise GLSError("GLS non ha restituito eventi per questo numero spedizione")
             raise GLSError("Pagina pubblica GLS non interpretabile")
-        def sort_key(e: dict[str, Any]):
-            value = e.get("event_at") or ""
-            try:
-                return datetime.fromisoformat(value)
-            except Exception:
-                return datetime.min.replace(tzinfo=ROME)
-        events.sort(key=sort_key)
+        ordina_cronologicamente(events)
         current = events[-1]
         return {
             "tracking_number": tracking_number,
@@ -558,14 +573,7 @@ class GLSClient:
                 }
             )
 
-        def sort_key(e: dict[str, Any]):
-            value = e.get("event_at") or ""
-            try:
-                return datetime.fromisoformat(value)
-            except Exception:
-                return datetime.min.replace(tzinfo=ROME)
-
-        events.sort(key=sort_key)
+        ordina_cronologicamente(events)
         current_event = events[-1] if events else {
             "event_at": None,
             "location": top.get("destination_depot_city", ""),
