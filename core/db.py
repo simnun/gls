@@ -895,6 +895,40 @@ class Database:
                     "azioni_rimaste": len(rimaste),
                     "eliminata": azione["action_label"]}
 
+    def ricalcola_ultima_attivita(self) -> int:
+        """Riporta l'ultima attivita' di ogni pratica all'ultimo intervento umano.
+
+        Finche' anche le righe di sistema aggiornavano quei campi, in elenco
+        compariva "Stato pratica: NEW -> IN_PROGRESS - Sistema" al posto di
+        quello che aveva fatto davvero un operatore.
+        """
+        corrette = 0
+        with self.connect() as conn:
+            righe = conn.execute(
+                "SELECT tracking_number, last_operator_name FROM shipments"
+                " WHERE LOWER(TRIM(COALESCE(last_operator_name,'')))='sistema'"
+            ).fetchall()
+            for riga in righe:
+                tracking = riga["tracking_number"]
+                ultima = conn.execute(
+                    """SELECT action_label, operator_name, created_at FROM operator_actions
+                       WHERE tracking_number=?
+                         AND LOWER(TRIM(COALESCE(operator_name,''))) NOT IN ('', 'sistema')
+                       ORDER BY created_at DESC, id DESC LIMIT 1""",
+                    (tracking,),
+                ).fetchone()
+                conn.execute(
+                    """UPDATE shipments
+                       SET last_operator_action=?, last_operator_action_at=?, last_operator_name=?
+                       WHERE tracking_number=?""",
+                    (ultima["action_label"] if ultima else None,
+                     ultima["created_at"] if ultima else None,
+                     ultima["operator_name"] if ultima else None,
+                     tracking),
+                )
+                corrette += 1
+        return corrette
+
     def segna_novita_gls(self, tracking_number: str, event_at: str | None) -> None:
         """Segnala che GLS ha aggiornato una pratica gia' presa in carico.
 
@@ -975,21 +1009,17 @@ class Database:
             """,
             (tracking_number, action_type, action_label, note, operator_name, now),
         )
-        # Quando e' un operatore a intervenire, la novita' GLS e' stata letta.
-        # Le righe scritte dal sistema non contano come presa visione.
+        # Le righe scritte dal sistema restano nel registro ma non sono lavoro di
+        # nessuno: non valgono come presa visione della novita' GLS e non devono
+        # comparire come "ultima attivita'" nella colonna dell'elenco, dove si
+        # cerca cosa ha fatto una persona.
         if (operator_name or "").strip().lower() not in {"", "sistema"}:
             conn.execute(
-                "UPDATE shipments SET unread_event_at=NULL WHERE tracking_number=?",
-                (tracking_number,),
+                "UPDATE shipments SET unread_event_at=NULL,"
+                " last_operator_action=?, last_operator_action_at=?, last_operator_name=?"
+                " WHERE tracking_number=?",
+                (action_label, now, operator_name, tracking_number),
             )
-        conn.execute(
-            """
-            UPDATE shipments
-            SET last_operator_action=?, last_operator_action_at=?, last_operator_name=?
-            WHERE tracking_number=?
-            """,
-            (action_label, now, operator_name, tracking_number),
-        )
         return int(cur.lastrowid)
 
     def dashboard(self, include_closed: bool = False) -> dict[str, Any]:

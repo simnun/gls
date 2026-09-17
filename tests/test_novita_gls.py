@@ -95,3 +95,38 @@ class RipristinoDaAzioniTests(unittest.TestCase):
         self.db.update_workflow("NI1", "RESOLVED", None, "Daniela")
         self.db.update_workflow("NI1", "NEW", None, "Sistema")
         self.assertEqual(self.db.ripristina_lavorazioni_annullate(), [])
+
+
+class UltimaAttivitaTests(unittest.TestCase):
+    """In elenco la colonna dell'ultima attivita' deve dire cosa ha fatto una
+    persona: i passaggi di stato del sistema non sono lavoro di nessuno."""
+
+    def setUp(self):
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        self.db.upsert_shipment({"tracking_number": "NI1"})
+
+    def test_il_sistema_non_diventa_l_ultima_attivita(self):
+        self.db.add_operator_action("NI1", "CUSTOMER_CALLED", "Cliente chiamato",
+                                    "", "Daniela", workflow_status="IN_PROGRESS")
+        self.db.update_workflow("NI1", "NEW", None, "Sistema")
+        riga = self.db.get_shipment("NI1")
+        self.assertEqual(riga["last_operator_action"], "Cliente chiamato")
+        self.assertEqual(riga["last_operator_name"], "Daniela")
+
+    def test_il_recupero_riporta_indietro_i_casi_gia_sporcati(self):
+        self.db.add_operator_action("NI1", "CUSTOMER_CALLED", "Cliente chiamato",
+                                    "", "Daniela", workflow_status="IN_PROGRESS")
+        with self.db.connect() as conn:
+            conn.execute("UPDATE shipments SET last_operator_action=?, last_operator_name='Sistema'"
+                         " WHERE tracking_number='NI1'", ("Stato pratica: NEW → IN_PROGRESS",))
+        self.assertEqual(self.db.ricalcola_ultima_attivita(), 1)
+        riga = self.db.get_shipment("NI1")
+        self.assertEqual(riga["last_operator_action"], "Cliente chiamato")
+        self.assertEqual(riga["last_operator_name"], "Daniela")
+
+    def test_senza_interventi_umani_la_colonna_resta_vuota(self):
+        self.db.update_workflow("NI1", "IN_PROGRESS", None, "Sistema")
+        with self.db.connect() as conn:
+            conn.execute("UPDATE shipments SET last_operator_name='Sistema' WHERE tracking_number='NI1'")
+        self.db.ricalcola_ultima_attivita()
+        self.assertIsNone(self.db.get_shipment("NI1")["last_operator_action"])
