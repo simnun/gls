@@ -550,6 +550,10 @@ class SyncEngine:
             "recommended_action": classification.recommended_action,
             "closed": closed,
             "source": "shopify+gls",
+            # Timbro dell'interrogazione appena fatta. Senza questo resterebbe il
+            # valore vecchio arrivato con `shipment` e la coda si bloccherebbe
+            # sull'ordine del primo giro, saltando sempre le stesse spedizioni.
+            "gls_checked_at": datetime.now(timezone.utc).isoformat(),
         }
         self.db.upsert_shipment(row)
 
@@ -622,6 +626,7 @@ class SyncEngine:
                 "recommended_action": "Nessuna azione: attendere la prima scansione GLS.",
                 "closed": False,
                 "source": "shopify+gls",
+                "gls_checked_at": datetime.now(timezone.utc).isoformat(),
             }
             self.db.upsert_shipment(row)
             return "PENDING_PICKUP"
@@ -639,6 +644,7 @@ class SyncEngine:
             "recommended_action": "Verificare il caso. Se e' un'anomalia nota/non recuperabile puoi impostare la pratica su CHIUSA; altrimenti lasciala aperta in DA VERIFICARE.",
             "closed": False,
             "source": "shopify+gls",
+            "gls_checked_at": datetime.now(timezone.utc).isoformat(),
         }
         before_status = (existing or {}).get("gls_status")
         self.db.upsert_shipment(row)

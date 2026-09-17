@@ -348,6 +348,25 @@ class AppHandler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     result["gls"]["list_sped_ok"] = False
                     result["gls"]["error"] = str(exc)
+            # ?tracking=NI... interroga GLS in diretta: serve a capire se un evento
+            # che si vede sul sito GLS manca perche' l'endpoint non lo restituisce
+            # o perche' il monitor non lo ha ancora raccolto.
+            tracking = (parse_qs(parsed.query).get("tracking") or [""])[0].strip()
+            if tracking and not CONFIG.mock_mode:
+                try:
+                    tracciato = ENGINE.gls.track(tracking)
+                    eventi = tracciato.get("events") or []
+                    result["tracking"] = {
+                        "numero": tracking,
+                        "fonte": tracciato.get("tracking_source"),
+                        "eventi_totali": len(eventi),
+                        "eventi": [
+                            {k: e.get(k) for k in ("event_at", "code", "state", "note", "location")}
+                            for e in eventi[-8:]
+                        ],
+                    }
+                except Exception as exc:
+                    result["tracking"] = {"numero": tracking, "errore": _senza_credenziali(exc)}
             return self._json(result)
 
         return self._serve_static(path)
