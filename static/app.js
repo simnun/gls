@@ -3,6 +3,8 @@ const state = {
   view: 'action',
   severity: '',
   workflow: '',
+  glsState: '',
+  glsStateMode: 'last',
   codOnly: false,
   search: '',
   dateFrom: '',
@@ -429,6 +431,7 @@ async function loadDashboard({quiet = false} = {}) {
     // dopo, senza bloccare: se quella chiamata fosse lenta o fallisse, prima
     // restava tutto vuoto e i contatori a zero pur avendo i dati in mano.
     renderSession();
+    aggiornaTendinaStati();
     renderKpis();
     renderConnection();
     renderTable();
@@ -477,6 +480,22 @@ function renderConnection() {
   }
 }
 
+function aggiornaTendinaStati() {
+  // L'elenco viene dagli stati realmente incontrati da GLS, non da una lista
+  // fissa: i testi del corriere cambiano nel tempo e una lista scritta a mano
+  // invecchierebbe in silenzio.
+  const menu = $('#glsStateFilter');
+  if (!menu) return;
+  const stati = [...(state.data?.stati_gls || [])].sort((a, b) => a.localeCompare(b, 'it'));
+  const scelto = state.glsState;
+  menu.innerHTML = `<option value="">Tutti gli stati GLS</option>` +
+    stati.map(t => `<option value="${esc(t)}" ${t === scelto ? 'selected' : ''}>${esc(t.length > 70 ? t.slice(0, 68) + '…' : t)}</option>`).join('');
+  if (scelto && !stati.includes(scelto)) {
+    state.glsState = '';
+    menu.value = '';
+  }
+}
+
 function renderKpis() {
   const rows = applyDateFilter([...(state.data?.shipments || [])]);
   const actionable = rows.filter(daVerificare);
@@ -509,6 +528,13 @@ function filteredShipments() {
   if (state.view === 'unknown') rows = rows.filter(x => !x.closed && x.category === 'UNCLASSIFIED');
   if (state.severity) rows = rows.filter(x => (x.effective_severity || x.severity) === state.severity);
   if (state.workflow) rows = rows.filter(x => x.workflow_status === state.workflow);
+  if (state.glsState) {
+    const vocabolario = state.data?.stati_gls || [];
+    const indice = vocabolario.indexOf(state.glsState);
+    rows = rows.filter(x => state.glsStateMode === 'any'
+      ? (x.stati_storico || []).includes(indice)
+      : String(x.gls_status || '').trim() === state.glsState);
+  }
   if (state.codOnly) rows = rows.filter(x => x.is_cod);
   if (state.search) {
     const q = state.search.toLowerCase();
@@ -1110,8 +1136,10 @@ function clearQueueFilters() {
   // "Osservazione" attivo resterebbe sempre vuota senza spiegazione.
   state.severity = '';
   state.workflow = '';
+  state.glsState = '';
   const sev = $('#severityFilter'); if (sev) sev.value = '';
   const wf = $('#workflowFilter'); if (wf) wf.value = '';
+  const gls = $('#glsStateFilter'); if (gls) gls.value = '';
 }
 
 function impostaMenuImpostazioni() {
@@ -1175,7 +1203,9 @@ function setQuickDate(days) {
 
 function resetFilters() {
   state.severity = ''; state.workflow = ''; state.codOnly = false; state.search = ''; state.dateFrom = ''; state.dateTo = '';
+  state.glsState = ''; state.glsStateMode = 'last';
   $('#searchInput').value = ''; $('#severityFilter').value = ''; $('#workflowFilter').value = ''; $('#codOnly').checked = false;
+  $('#glsStateFilter').value = ''; $('#glsStateMode').value = 'last';
   $('#dateFrom').value = ''; $('#dateTo').value = '';
   $$('.quick-dates button').forEach(b => b.classList.remove('active'));
   renderKpis(); renderTable();
@@ -1202,6 +1232,8 @@ function bind() {
   $('#searchInput').addEventListener('input', e => { state.search = e.target.value.trim(); renderTable(); });
   $('#severityFilter').addEventListener('change', e => { state.severity = e.target.value; renderTable(); });
   $('#workflowFilter').addEventListener('change', e => { state.workflow = e.target.value; renderTable(); });
+  $('#glsStateFilter').addEventListener('change', e => { state.glsState = e.target.value; renderTable(); });
+  $('#glsStateMode').addEventListener('change', e => { state.glsStateMode = e.target.value; renderTable(); });
   $('#codOnly').addEventListener('change', e => { state.codOnly = e.target.checked; renderTable(); });
   $('#dateFrom').addEventListener('change', e => {
     state.dateFrom = e.target.value || '';

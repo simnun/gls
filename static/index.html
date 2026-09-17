@@ -71,6 +71,7 @@
         <div class="search-wrap"><span class="search-icon">⌕</span><input id="searchInput" type="search" placeholder="Ordine, cliente, tracking o stato GLS…" autocomplete="off"></div>
         <select id="severityFilter" aria-label="Priorità"><option value="">Tutte le priorità</option><option value="CRITICAL">Massima</option><option value="WARNING">Alta</option><option value="WATCH">Osservazione</option><option value="INFO">Informativo</option><option value="NORMAL">Normale</option></select>
         <select id="workflowFilter" aria-label="Lavorazione"><option value="">Tutte le lavorazioni</option><option value="NEW">Da verificare</option><option value="IN_PROGRESS">In lavorazione</option><option value="RESOLVED">Chiusa</option></select>
+        <div class="state-filter"><select id="glsStateFilter" aria-label="Stato GLS"><option value="">Tutti gli stati GLS</option></select><select id="glsStateMode" aria-label="Come cercare lo stato"><option value="last">è l'ultimo stato</option><option value="any">è passata da qui</option></select></div>
         <div class="quick-dates" aria-label="Intervallo rapido"><button type="button" data-days="0">Oggi</button><button type="button" data-days="7">7g</button><button type="button" data-days="30">30g</button></div>
         <div class="date-range" title="Filtra per data ordine Shopify"><label>Dal <input id="dateFrom" type="date"></label><span>→</span><label>Al <input id="dateTo" type="date"></label></div>
         <label class="toggle-check"><input id="codOnly" type="checkbox"><span></span> Solo COD</label>

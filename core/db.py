@@ -1043,10 +1043,29 @@ class Database:
                 sev = item.get("effective_severity") or item.get("severity")
                 counts[sev] = counts.get(sev, 0) + 1
                 workflow[item["workflow_status"]] = workflow.get(item["workflow_status"], 0) + 1
+            # Stati GLS attraversati da ogni spedizione, per il filtro "e' passata
+            # da". Una sola query aggregata invece di una per spedizione, e in
+            # elenco viaggiano solo gli indici di un dizionario condiviso: i testi
+            # di GLS sono lunghi e si ripetono su centinaia di righe.
+            vocabolario: dict[str, int] = {}
+            percorsi: dict[str, list[int]] = {}
+            for riga in conn.execute(
+                "SELECT tracking_number, state FROM events"
+                " WHERE COALESCE(state,'')<>'' GROUP BY tracking_number, state"
+            ).fetchall():
+                testo = (riga["state"] or "").strip()
+                if not testo:
+                    continue
+                indice = vocabolario.setdefault(testo, len(vocabolario))
+                percorsi.setdefault(riga["tracking_number"], []).append(indice)
+            for item in shipments:
+                item["stati_storico"] = percorsi.get(item["tracking_number"], [])
+
             unknown = sum(1 for x in shipments if x["category"] == "UNCLASSIFIED")
             pending_actions = sum(1 for x in shipments if x.get("last_operator_action") and x["workflow_status"] not in {"RESOLVED", "IGNORED"})
             return {
                 "shipments": shipments,
+                "stati_gls": sorted(vocabolario, key=vocabolario.get),
                 "counts": counts,
                 "workflow_counts": workflow,
                 "unknown_count": unknown,
