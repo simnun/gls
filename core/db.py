@@ -656,6 +656,25 @@ class Database:
         # DO NOTHING invece di intercettare l'errore di integrita': su Postgres
         # una violazione di vincolo aborta l'intera transazione.
         with self.connect() as conn:
+            # Lo stesso evento letto dal canale pubblico e da quello ufficiale ha
+            # due impronte diverse, perche' il pubblico non espone il codice GLS.
+            # Se ritroviamo il gemello senza codice lo completiamo invece di
+            # affiancargli un duplicato nello storico.
+            if (event.get("code") or "").strip():
+                gemello = conn.execute(
+                    "SELECT id FROM events WHERE tracking_number=? AND event_at=? AND state=?"
+                    " AND COALESCE(code,'')='' LIMIT 1",
+                    (event["tracking_number"], event.get("event_at"), event.get("state")),
+                ).fetchone()
+                if gemello:
+                    conn.execute(
+                        "UPDATE events SET event_hash=?,code=?,note=?,location=?,"
+                        "severity=?,category=?,reason=? WHERE id=?",
+                        (event["event_hash"], event.get("code"), event.get("note"),
+                         event.get("location"), event.get("severity"), event.get("category"),
+                         event.get("reason"), gemello["id"]),
+                    )
+                    return False
             cur = conn.execute(
                 """
                 INSERT INTO events(

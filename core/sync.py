@@ -524,15 +524,20 @@ class SyncEngine:
         # gls_checked_at viene impostato da upsert_shipment: e' il campo che
         # determina il turno nella coda delle prossime esecuzioni.
         current = tracked.get("current_event") or {}
+        # La nota di testata di GLS resta ferma alla scansione precedente: se la
+        # prendessimo quando l'ultimo evento non ne ha una, la spedizione
+        # risulterebbe ancora in giacenza per via di un "in attesa di istruzioni"
+        # vecchio di un giorno. Vale solo quando non c'e' proprio un evento.
+        nota_evento = (current.get("note") or "").strip()
+        note_text = nota_evento if current else (tracked.get("note") or "")
         classification = self.classifier.classify(
             code=current.get("code") or tracked.get("code"),
             state=current.get("state") or tracked.get("status"),
-            note=current.get("note") or tracked.get("note"),
+            note=note_text,
             event_at=current.get("event_at"),
             is_cod=bool(shipment.get("is_cod")),
         )
         status_text = current.get("state") or tracked.get("status") or ""
-        note_text = current.get("note") or tracked.get("note") or ""
         closed = classification.category in {"DELIVERED", "RETURN"}
         row = {
             **shipment,

@@ -59,3 +59,27 @@ class TrackingUfficialeTests(unittest.TestCase):
         # spedizione in giacenza anche dopo che e' tornata in consegna.
         self.assertNotEqual(corrente["state"], "Non consegnato")
         self.assertNotIn("ATTESA DI ISTRUZIONI", corrente["note"])
+
+
+class NotaDiTestataTests(unittest.TestCase):
+    """La nota di testata non deve riportare in giacenza una spedizione
+    che GLS ha gia' rimesso in consegna."""
+
+    def test_l_ultimo_evento_senza_nota_resta_senza_nota(self):
+        corrente = GLSClient.parse_tracking_xml(XML, "NI665031172")["current_event"]
+        self.assertEqual((corrente.get("note") or "").strip(), "")
+
+    def test_classificazione_dell_ultimo_evento(self):
+        from pathlib import Path
+
+        from core.classifier import Classifier
+
+        class DbFinto:
+            def get_override(self, code):
+                return None
+
+        corrente = GLSClient.parse_tracking_xml(XML, "NI665031172")["current_event"]
+        esito = Classifier(Path("config/rules.json"), DbFinto()).classify(
+            code=corrente.get("code"), state=corrente.get("state"),
+            note=corrente.get("note"), event_at=corrente.get("event_at"), is_cod=False)
+        self.assertEqual(esito.category, "OUT_FOR_DELIVERY")
