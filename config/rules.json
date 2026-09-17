@@ -120,15 +120,17 @@
     },
     {
       "id": "cod_unavailable",
-      "severity": "WARNING",
+      "severity": "WATCH",
       "category": "COD_ISSUE",
       "patterns": [
         "importo contrassegno non disponibile",
         "contrassegno non disponibile"
       ],
-      "action": "Verificare il contrassegno e contattare GLS se non si risolve entro il giorno lavorativo.",
-      "escalate_after_hours": 24,
-      "escalate_to": "CRITICAL"
+      "action": "Nessuna azione immediata: GLS riprova il primo giorno lavorativo. Tenere d'occhio che la consegna parta e che il destinatario la ritiri.",
+      "escalate_to": "WARNING",
+      "escalate_after_business_days": 1,
+      "second_escalate_after_business_days": 2,
+      "second_escalate_to": "CRITICAL"
     },
     {
       "id": "refused",

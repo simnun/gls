@@ -4,11 +4,29 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
 from .timezones import ROME  # noqa: E402
+
+
+def scadenza_giorni_lavorativi(evento: datetime, giorni: int, ora_fine: int = 20) -> datetime:
+    """Fine dell'ennesimo giorno lavorativo dopo l'evento.
+
+    Serve alle regole in cui GLS promette un nuovo tentativo "il primo giorno
+    lavorativo": misurarle in ore farebbe scattare l'allarme il sabato per un
+    evento del venerdi'.
+    """
+    giorno = evento.date()
+    contati = 0
+    while contati < max(1, int(giorni)):
+        giorno += timedelta(days=1)
+        if giorno.weekday() < 5:
+            contati += 1
+    return datetime.combine(giorno, time(ora_fine, 0), tzinfo=evento.tzinfo)
+
+
 SEVERITY_RANK = {"NORMAL": 1, "INFO": 2, "WATCH": 3, "WARNING": 4, "CRITICAL": 5}
 
 
@@ -104,7 +122,15 @@ class Classifier:
                 continue
 
             severity = rule.get("severity", "WATCH")
-            if age_hours is not None:
+            giorni = rule.get("escalate_after_business_days")
+            if giorni is not None and event_dt is not None:
+                secondi_giorni = rule.get("second_escalate_after_business_days")
+                if (secondi_giorni is not None
+                        and now >= scadenza_giorni_lavorativi(event_dt, secondi_giorni)):
+                    severity = rule.get("second_escalate_to", severity)
+                elif now >= scadenza_giorni_lavorativi(event_dt, giorni):
+                    severity = rule.get("escalate_to", severity)
+            elif age_hours is not None:
                 second_after = rule.get("second_escalate_after_hours")
                 if second_after is not None and age_hours >= float(second_after):
                     severity = rule.get("second_escalate_to", severity)
