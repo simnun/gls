@@ -83,3 +83,43 @@ class NotaDiTestataTests(unittest.TestCase):
             code=corrente.get("code"), state=corrente.get("state"),
             note=corrente.get("note"), event_at=corrente.get("event_at"), is_cod=False)
         self.assertEqual(esito.category, "OUT_FOR_DELIVERY")
+
+
+class DoppioniStoricoTests(unittest.TestCase):
+    """Lo stesso evento letto dai due canali non deve comparire due volte,
+    ne' far fallire il salvataggio per impronta duplicata."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        from core.db import Database
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        self.db.upsert_shipment({"tracking_number": "NI1"})
+
+    def evento(self, code, event_hash):
+        return {"tracking_number": "NI1", "event_hash": event_hash,
+                "event_at": "2026-09-16T12:21:00+02:00", "code": code,
+                "state": "Spedizione in giacenza presso la sede GLS",
+                "note": "Al citofono", "location": "Molassana New",
+                "severity": "CRITICAL", "category": "STORAGE", "reason": "", "raw": {}}
+
+    def conta(self):
+        with self.db.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM events WHERE tracking_number='NI1'").fetchone()[0]
+
+    def test_il_gemello_senza_codice_viene_completato(self):
+        self.db.insert_event(self.evento("", "hash-pubblico"))
+        self.db.insert_event(self.evento("66", "hash-ufficiale"))
+        self.assertEqual(self.conta(), 1)
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT code FROM events").fetchone()[0], "66")
+
+    def test_se_la_versione_completa_esiste_gia_il_doppione_sparisce(self):
+        self.db.insert_event(self.evento("66", "hash-ufficiale"))
+        self.db.insert_event(self.evento("", "hash-pubblico"))
+        self.assertEqual(self.conta(), 2)
+        # Ripassando il canale ufficiale il doppione povero viene tolto,
+        # senza violare il vincolo di unicita'.
+        self.db.insert_event(self.evento("66", "hash-ufficiale"))
+        self.assertEqual(self.conta(), 1)

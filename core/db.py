@@ -667,13 +667,24 @@ class Database:
                     (event["tracking_number"], event.get("event_at"), event.get("state")),
                 ).fetchone()
                 if gemello:
-                    conn.execute(
-                        "UPDATE events SET event_hash=?,code=?,note=?,location=?,"
-                        "severity=?,category=?,reason=? WHERE id=?",
-                        (event["event_hash"], event.get("code"), event.get("note"),
-                         event.get("location"), event.get("severity"), event.get("category"),
-                         event.get("reason"), gemello["id"]),
-                    )
+                    completo = conn.execute(
+                        "SELECT id FROM events WHERE event_hash=? LIMIT 1",
+                        (event["event_hash"],),
+                    ).fetchone()
+                    if completo:
+                        # La versione con codice c'e' gia': il gemello povero e'
+                        # solo un doppione da togliere. Riscriverlo con la stessa
+                        # impronta violerebbe il vincolo e farebbe fallire l'intero
+                        # salvataggio della spedizione.
+                        conn.execute("DELETE FROM events WHERE id=?", (gemello["id"],))
+                    else:
+                        conn.execute(
+                            "UPDATE events SET event_hash=?,code=?,note=?,location=?,"
+                            "severity=?,category=?,reason=? WHERE id=?",
+                            (event["event_hash"], event.get("code"), event.get("note"),
+                             event.get("location"), event.get("severity"), event.get("category"),
+                             event.get("reason"), gemello["id"]),
+                        )
                     return False
             cur = conn.execute(
                 """
