@@ -100,6 +100,8 @@ function orderNumeric(value) {
 }
 // Anomalie che GLS risolve aprendo una giacenza il giorno dopo: sono i casi in
 // cui l'operatore raccoglie le informazioni oggi e svincola domani.
+// Il collo e' in viaggio verso il cliente: nessuna azione, solo da seguire.
+const CATEGORIE_IN_CONSEGNA = ['OUT_FOR_DELIVERY', 'SCHEDULED', 'IN_TRANSIT', 'CORRESPONDENT'];
 const CATEGORIE_VERSO_GIACENZA = ['ADDRESS_ERROR', 'ABSENT', 'REFUSED', 'ACTION_REQUIRED',
   'COD_ISSUE', 'DELIVERY_FAILURE', 'DAMAGE_OR_LOSS'];
 
@@ -142,6 +144,17 @@ function statoGestione(row) {
     dettaglio: 'Le informazioni sono gia\u2019 state raccolte: si attende che GLS apra la giacenza.',
   };
   return null;
+}
+
+function pastigliaNovita(row) {
+  // GLS ha aggiornato una pratica gia' presa in carico: prima il sistema la
+  // rimandava in DA VERIFICARE cancellando il lavoro fatto, ora la lascia dov'e'
+  // e mette in evidenza la notizia finche' l'operatore non interviene.
+  if (!row || !row.unread_event_at) return '';
+  const quando = formatDate(row.unread_event_at);
+  const testo = String(row.gls_status || '').trim();
+  const titolo = testo ? `${quando} · ${testo}` : `Aggiornamento GLS del ${quando}`;
+  return `<div class="news-chip" title="${esc(titolo)}"><span>!</span>Novit\u00e0 GLS</div>`;
 }
 
 function pastigliaGestione(row) {
@@ -462,6 +475,7 @@ function renderKpis() {
   const working = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status)).length;
   const delivered = rows.filter(x => x.category === 'DELIVERED').length;
   const returned = rows.filter(x => x.category === 'RETURN').length;
+  const inConsegna = rows.filter(x => !x.closed && CATEGORIE_IN_CONSEGNA.includes(x.category)).length;
   const incons = rows.filter(x => x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)).length;
   $('#kpiVerify').textContent = actionable.length;
   $('#kpiWatch').textContent = watch;
@@ -471,6 +485,7 @@ function renderKpis() {
   $('#tabWorkingCount').textContent = working;
   $('#tabDeliveredCount').textContent = delivered;
   $('#tabReturnedCount').textContent = returned;
+  $('#tabDeliveringCount').textContent = inConsegna;
   $('#tabInconsistencyCount').textContent = incons;
 }
 
@@ -481,6 +496,7 @@ function filteredShipments() {
   if (state.view === 'active') rows = rows.filter(x => !x.closed);
   if (state.view === 'delivered') rows = rows.filter(x => x.category === 'DELIVERED');
   if (state.view === 'returned') rows = rows.filter(x => x.category === 'RETURN');
+  if (state.view === 'delivering') rows = rows.filter(x => !x.closed && CATEGORIE_IN_CONSEGNA.includes(x.category));
   if (state.view === 'unknown') rows = rows.filter(x => !x.closed && x.category === 'UNCLASSIFIED');
   if (state.severity) rows = rows.filter(x => (x.effective_severity || x.severity) === state.severity);
   if (state.workflow) rows = rows.filter(x => x.workflow_status === state.workflow);
@@ -514,7 +530,8 @@ function renderTable() {
   const empty = $('#emptyState');
   const titles = {
     action: 'Spedizioni da verificare', working: 'Pratiche in lavorazione', active: 'Tutte le spedizioni GLS attive',
-    delivered: 'Consegnati al cliente · chiusi', returned: 'Rientrati al mittente · chiusi', unknown: 'Nuovi stati GLS'
+    delivered: 'Consegnati al cliente · chiusi', returned: 'Rientrati al mittente · chiusi',
+    delivering: 'In viaggio verso il cliente', unknown: 'Nuovi stati GLS'
   };
   $('#tableTitle').textContent = titles[state.view] || 'Spedizioni GLS';
   const total = (state.data?.shipments || []).filter(x => !x.closed).length;
@@ -542,7 +559,7 @@ function renderTable() {
         <td><div class="customer-main">${esc(row.customer_name || 'Cliente non disponibile')}</div><div class="cell-sub">${esc(location)}</div></td>
         <td><div class="event-title">${esc(current)}</div>${note ? `<div class="event-note" title="${esc(note)}">${esc(note)}</div>` : ''}${row.has_inconsistency ? `<div class="cell-alert">${esc(row.inconsistency_titles || '')}</div>` : ''}</td>
         <td><div>${esc(age(row.gls_event_at))}</div><div class="cell-sub">${esc(formatDate(row.gls_event_at))}</div></td>
-        <td>${pastigliaGestione(row)}<span class="workflow-pill ${esc(row.workflow_status)}">${esc(workflowLabels[row.workflow_status] || row.workflow_status)}</span>${activity}</td>
+        <td>${pastigliaNovita(row)}${pastigliaGestione(row)}<span class="workflow-pill ${esc(row.workflow_status)}">${esc(workflowLabels[row.workflow_status] || row.workflow_status)}</span>${activity}</td>
         <td><button class="row-btn" data-open="${esc(row.tracking_number)}">Gestisci →</button></td>
       </tr>`;
   }).join('');
@@ -593,6 +610,7 @@ function renderEmptyStateVuota(empty, monitored) {
       : ['Nessuna spedizione attiva', 'Tutte le spedizioni monitorate hanno raggiunto un esito finale.'],
     delivered: ['Nessuna consegna registrata', 'Qui finiscono le spedizioni consegnate al cliente.'],
     returned: ['Nessun rientro registrato', 'Qui finiscono le spedizioni tornate al mittente.'],
+    delivering: ['Nessuna spedizione in viaggio', 'Qui compaiono le spedizioni in transito o in consegna oggi: da seguire, non da gestire.'],
     unknown: ['Nessuno stato GLS sconosciuto', 'Tutti gli stati ricevuti sono gia' + String.fromCharCode(39) + ' classificati dalle regole.'],
   };
 
@@ -694,6 +712,18 @@ function drawerHtml(item) {
     : item.last_operator_action ? `
     <div class="internal-banner"><div class="icon">✓</div><div><strong>Intervento già registrato: ${esc(item.last_operator_action)}</strong><span>${esc(item.last_operator_name || 'Operatore')} · ${esc(formatDate(item.last_operator_action_at))}. Lo stato GLS può restare invariato finché la sede non recepisce l'operazione.</span></div></div>` : '';
 
+  // La novita' arrivata da GLS su una pratica gia' in lavorazione: va vista
+  // subito, prima di ogni altra cosa nel pannello.
+  const newsBanner = item.unread_event_at ? `
+    <div class="news-banner">
+      <div class="icon">!</div>
+      <div>
+        <strong>Novit\u00e0 da GLS dopo la tua ultima nota</strong>
+        <span>${esc(formatDate(item.unread_event_at))} · ${esc(item.gls_status || 'Nuovo evento GLS')}${item.gls_note ? ` · ${esc(item.gls_note)}` : ''}</span>
+        <em>La pratica \u00e8 rimasta in lavorazione: l'avviso sparisce quando salvi una nota o registri un'azione.</em>
+      </div>
+    </div>` : '';
+
   const issueBox = issues.length ? `
     <div class="inconsistency-banner">
       <div class="section-title-row"><h3>⚠ Incongruenze rilevate</h3><span>PRIORITÀ MASSIMA</span></div>
@@ -740,7 +770,7 @@ function drawerHtml(item) {
 
   return `
     <div class="status-card ${esc(sev)}"><span class="priority-pill ${esc(sev)}">${esc(severityLabels[sev] || sev)}</span><h3>${esc(item.gls_status || 'Stato GLS non disponibile')}</h3>${item.gls_note ? `<p>${esc(item.gls_note)}</p>` : ''}${item.reason ? `<p class="muted" style="margin-top:7px">${esc(item.reason)}</p>` : ''}</div>
-    ${issueBox}${internalBanner}
+    ${newsBanner}${issueBox}${internalBanner}
 
     <div class="detail-grid">
       <div class="detail-item"><label>Ordine Shopify</label><strong>${esc(item.order_name || '—')}</strong><div class="muted">${esc(formatMoney(item.total_amount, item.currency))} · ${esc(formatDate(item.order_created_at, false))}</div></div>
@@ -1054,10 +1084,37 @@ function clearQueueFilters() {
   const wf = $('#workflowFilter'); if (wf) wf.value = '';
 }
 
+function impostaMenuImpostazioni() {
+  // Stati nuovi e Regole servono di rado: stanno nell'ingranaggio, non fra le
+  // code di lavoro quotidiane.
+  const bottone = $('#settingsBtn');
+  const pannello = $('#settingsPanel');
+  if (!bottone || !pannello) return;
+
+  const chiudi = () => {
+    pannello.classList.add('hidden');
+    bottone.setAttribute('aria-expanded', 'false');
+  };
+  bottone.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const aperto = !pannello.classList.contains('hidden');
+    pannello.classList.toggle('hidden', aperto);
+    bottone.setAttribute('aria-expanded', String(!aperto));
+  });
+  pannello.addEventListener('click', (ev) => ev.stopPropagation());
+  $$('.settings-item').forEach(voce => voce.addEventListener('click', () => {
+    chiudi();
+    switchView(voce.dataset.view);
+  }));
+  document.addEventListener('click', chiudi);
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') chiudi(); });
+}
+
 function switchView(view) {
   if (state.view !== view) clearQueueFilters();
   state.view = view;
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  $$('.settings-item').forEach(v => v.classList.toggle('active', v.dataset.view === view));
   $('#rulesPanel').classList.add('hidden');
   $('#stockPanel').classList.add('hidden');
   $('#inconsistencyPanel').classList.add('hidden');
@@ -1105,6 +1162,7 @@ function bind() {
   $('#drawerBackdrop').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
   $$('.tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+  impostaMenuImpostazioni();
   $$('.metric-card').forEach(k => k.addEventListener('click', () => {
     if (k.dataset.viewTarget) switchView(k.dataset.viewTarget);
     else switchView(k.dataset.category ? 'unknown' : 'active');

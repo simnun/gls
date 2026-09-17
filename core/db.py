@@ -68,6 +68,7 @@ class Database:
                     fulfillment_created_at TEXT,
                     fulfillment_updated_at TEXT,
                     gls_checked_at TEXT,
+                    unread_event_at TEXT,
                     customer_gid TEXT,
                     customer_legacy_id TEXT,
                     customer_name TEXT,
@@ -267,6 +268,7 @@ class Database:
             "fulfillment_created_at": "TEXT",
             "fulfillment_updated_at": "TEXT",
             "gls_checked_at": "TEXT",
+            "unread_event_at": "TEXT",
         }
         for name, decl in additions.items():
             if name not in cols:
@@ -761,6 +763,18 @@ class Database:
                     operator_name=operator_name,
                 )
 
+    def segna_novita_gls(self, tracking_number: str, event_at: str | None) -> None:
+        """Segnala che GLS ha aggiornato una pratica gia' presa in carico.
+
+        Sostituisce il vecchio ritorno forzato a DA VERIFICARE: il lavoro
+        dell'operatore resta, ma la notizia non passa inosservata.
+        """
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE shipments SET unread_event_at=? WHERE tracking_number=?",
+                (event_at or utcnow(), tracking_number),
+            )
+
     def add_operator_action(
         self,
         tracking_number: str,
@@ -829,6 +843,13 @@ class Database:
             """,
             (tracking_number, action_type, action_label, note, operator_name, now),
         )
+        # Quando e' un operatore a intervenire, la novita' GLS e' stata letta.
+        # Le righe scritte dal sistema non contano come presa visione.
+        if (operator_name or "").strip().lower() not in {"", "sistema"}:
+            conn.execute(
+                "UPDATE shipments SET unread_event_at=NULL WHERE tracking_number=?",
+                (tracking_number,),
+            )
         conn.execute(
             """
             UPDATE shipments

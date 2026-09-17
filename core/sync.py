@@ -140,6 +140,9 @@ def technical_error_info(message: str) -> dict[str, Any]:
     }
 
 
+IN_LAVORAZIONE = {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}
+
+
 class SyncEngine:
     def __init__(self, config, db: Database):
         self.config = config
@@ -594,15 +597,27 @@ class SyncEngine:
         # Stati finali puliti vengono archiviati automaticamente nei tab dedicati.
         # Se l'esito finale genera un'incongruenza logica (es. rientro non richiesto),
         # la pratica resta DA VERIFICARE finche un operatore non la chiude esplicitamente.
+        # Una pratica gia' presa in carico non torna indietro da sola: l'operatore
+        # ha gia' fatto la sua parte e sta aspettando GLS. Riportarla a DA
+        # VERIFICARE cancellerebbe il suo lavoro senza dirgli cosa fare di nuovo.
+        # La novita' viene segnalata e resta in evidenza finche' non la legge.
+        in_carico = (self.db.get_shipment(shipment["tracking_number"]) or {}).get("workflow_status") in IN_LAVORAZIONE
+
         if classification.category in {"DELIVERED", "RETURN"}:
-            self.db.update_workflow(
-                shipment["tracking_number"],
-                "NEW" if issues else "RESOLVED",
-                None,
-                "Sistema",
-            )
+            if issues and in_carico:
+                self.db.segna_novita_gls(shipment["tracking_number"], current.get("event_at"))
+            else:
+                self.db.update_workflow(
+                    shipment["tracking_number"],
+                    "NEW" if issues else "RESOLVED",
+                    None,
+                    "Sistema",
+                )
         elif new_event_added and (classification.severity in {"WARNING", "CRITICAL"} or issues):
-            self.db.update_workflow(shipment["tracking_number"], "NEW", None, "Sistema")
+            if in_carico:
+                self.db.segna_novita_gls(shipment["tracking_number"], current.get("event_at"))
+            else:
+                self.db.update_workflow(shipment["tracking_number"], "NEW", None, "Sistema")
 
     def _save_no_events(self, shipment: dict[str, Any]) -> str:
         # Un tracking senza eventi resta una vera pratica Shopify: ordine, cliente e

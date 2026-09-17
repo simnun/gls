@@ -50,13 +50,21 @@
           <button class="tab" data-view="working"><span>In lavorazione</span><b id="tabWorkingCount">0</b></button>
           <button class="tab" data-view="active"><span>Tutte GLS</span></button>
           <button class="tab delivered-tab" data-view="delivered"><span>Consegnati</span><b id="tabDeliveredCount">0</b></button>
+          <button class="tab delivering-tab" data-view="delivering"><span>In consegna</span><b id="tabDeliveringCount">0</b></button>
           <button class="tab returned-tab" data-view="returned"><span>Rientrati</span><b id="tabReturnedCount">0</b></button>
           <button class="tab" data-view="inconsistencies"><span>Incongruenze</span><b id="tabInconsistencyCount">0</b></button>
           <button class="tab" data-view="stocks"><span>Storico giacenze</span><b id="tabStockCount">0</b></button>
-          <button class="tab" data-view="unknown"><span>Stati nuovi</span></button>
-          <button class="tab" data-view="rules"><span>Regole</span></button>
         </nav>
-        <div id="lastSync" class="last-sync">Mai aggiornato</div>
+        <div class="workspace-tools">
+          <div id="lastSync" class="last-sync">Mai aggiornato</div>
+          <div class="settings-menu">
+            <button id="settingsBtn" class="settings-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Impostazioni">⚙</button>
+            <div id="settingsPanel" class="settings-panel hidden" role="menu">
+              <button class="settings-item" type="button" data-view="unknown" role="menuitem">Stati nuovi da classificare</button>
+              <button class="settings-item" type="button" data-view="rules" role="menuitem">Regole di classificazione</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="filters" class="filter-bar">
