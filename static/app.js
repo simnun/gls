@@ -102,6 +102,7 @@ function orderNumeric(value) {
 // Il collo e' in viaggio verso il cliente: nessuna azione, solo da seguire.
 const CATEGORIE_IN_CONSEGNA = ['OUT_FOR_DELIVERY', 'SCHEDULED', 'IN_TRANSIT', 'CORRESPONDENT'];
 const CATEGORIE_VERSO_GIACENZA = ['ADDRESS_ERROR', 'ABSENT', 'REFUSED', 'ACTION_REQUIRED', 'DELIVERY_RETRY',
+  'PICKUP_AT_DEPOT', 'RECIPIENT_CLOSED',
   'COD_ISSUE', 'DELIVERY_FAILURE', 'DAMAGE_OR_LOSS'];
 
 function daVerificare(row) {
@@ -472,6 +473,20 @@ function renderConnection() {
   }
 }
 
+function segnalaStatiDaClassificare(quanti) {
+  // "Stati nuovi" vive nell'ingranaggio: se GLS inventa un testo che nessuna
+  // regola riconosce, senza un segno nessuno andrebbe mai a guardare.
+  const bottone = $('#settingsBtn');
+  const voce = $$('.settings-item').find(v => v.dataset.view === 'unknown');
+  if (bottone) bottone.classList.toggle('ha-novita', quanti > 0);
+  if (voce) {
+    voce.textContent = quanti > 0
+      ? `Stati nuovi da classificare · ${quanti}`
+      : 'Stati nuovi da classificare';
+    voce.classList.toggle('con-avviso', quanti > 0);
+  }
+}
+
 function aggiornaTendinaStati() {
   // L'elenco viene dagli stati realmente incontrati da GLS, non da una lista
   // fissa: i testi del corriere cambiano nel tempo e una lista scritta a mano
@@ -497,6 +512,7 @@ function renderKpis() {
   const returned = rows.filter(x => x.category === 'RETURN').length;
   const inConsegna = rows.filter(x => !x.closed && CATEGORIE_IN_CONSEGNA.includes(x.category)).length;
   const attive = rows.filter(x => !x.closed).length;
+  const unknown = rows.filter(x => !x.closed && x.category === 'UNCLASSIFIED').length;
   $('#kpiVerify').textContent = actionable.length;
   $('#kpiWatch').textContent = watch;
   $('#kpiWorking').textContent = working;
@@ -506,6 +522,7 @@ function renderKpis() {
   $('#tabReturnedCount').textContent = returned;
   $('#tabDeliveringCount').textContent = inConsegna;
   $('#tabActiveCount').textContent = attive;
+  segnalaStatiDaClassificare(unknown);
   $('#tabAllCount').textContent = rows.length;
 }
 

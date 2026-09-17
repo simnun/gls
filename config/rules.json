@@ -47,7 +47,10 @@
       "exclude_patterns": [
         "contrassegno non disponibile",
         "non siamo riusciti a raggiungerti",
-        "primo tentativo di consegna"
+        "primo tentativo di consegna",
+        "oggi non siamo riusciti a consegnare",
+        "non e stato possibile consegnare",
+        "destinatario chiuso per turno"
       ],
       "action": "Nessuna azione salvo persistenza oltre la data prevista."
     },
@@ -121,15 +124,75 @@
       "second_escalate_to": "WARNING"
     },
     {
-      "id": "first_attempt_failed",
+      "id": "delivery_attempt_failed",
       "severity": "WATCH",
       "category": "DELIVERY_RETRY",
       "patterns": [
         "non siamo riusciti a raggiungerti",
         "primo tentativo di consegna",
-        "ritenteremo la consegna"
+        "ritenteremo la consegna",
+        "oggi non siamo riusciti a consegnare",
+        "non e stato possibile consegnare",
+        "destinatario chiuso per turno"
       ],
-      "action": "Nessuna azione immediata: GLS ritenta da sola il primo giorno lavorativo. Tenere d'occhio che il secondo tentativo vada a buon fine.",
+      "action": "Nessuna azione immediata: GLS ritenta da sola il primo giorno lavorativo. Tenere d'occhio che il tentativo successivo vada a buon fine.",
+      "escalate_after_business_days": 1,
+      "escalate_to": "WARNING",
+      "second_escalate_after_business_days": 2,
+      "second_escalate_to": "CRITICAL"
+    },
+    {
+      "id": "agreed_delivery",
+      "severity": "NORMAL",
+      "category": "SCHEDULED",
+      "patterns": [
+        "consegna concordata con il destinatario"
+      ],
+      "action": "Nessuna azione: la data e' stata concordata con il destinatario."
+    },
+    {
+      "id": "recipient_closed_holiday",
+      "severity": "WATCH",
+      "category": "RECIPIENT_CLOSED",
+      "patterns": [
+        "chiuso per ferie",
+        "alla data di riapertura"
+      ],
+      "action": "Destinatario chiuso per ferie: GLS aspetta la riapertura. Valutare se conviene attendere o richiamare la spedizione.",
+      "escalate_after_business_days": 3,
+      "escalate_to": "WARNING"
+    },
+    {
+      "id": "business_closed_down",
+      "severity": "CRITICAL",
+      "category": "ACTION_REQUIRED",
+      "patterns": [
+        "cessata attivit"
+      ],
+      "action": "Il destinatario non esiste piu' a quell'indirizzo: la consegna non andra' a buon fine. Serve un nuovo indirizzo o il rientro."
+    },
+    {
+      "id": "pickup_at_depot",
+      "severity": "WATCH",
+      "category": "PICKUP_AT_DEPOT",
+      "patterns": [
+        "disponibile per il ritiro in sede gls",
+        "richiesto il ritiro della spedizione presso la sede gls"
+      ],
+      "action": "Il collo aspetta il destinatario in sede GLS. Se non lo ritira entro pochi giorni diventa una giacenza.",
+      "escalate_after_business_days": 3,
+      "escalate_to": "WARNING",
+      "second_escalate_after_business_days": 5,
+      "second_escalate_to": "CRITICAL"
+    },
+    {
+      "id": "carrier_data_error",
+      "severity": "WATCH",
+      "category": "CARRIER_DELAY",
+      "patterns": [
+        "errore nel trasferimento dei dati della spedizione"
+      ],
+      "action": "Problema tecnico di GLS sul trasferimento dati: riprovano da soli. Se si ripete oltre il giorno lavorativo, sollecitare la sede.",
       "escalate_after_business_days": 1,
       "escalate_to": "WARNING",
       "second_escalate_after_business_days": 2,

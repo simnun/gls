@@ -140,6 +140,21 @@ def technical_error_info(message: str) -> dict[str, Any]:
     }
 
 
+# Quanto uno stato "chiude il discorso". Serve solo a mettere in fila due
+# scansioni dello stesso minuto: nella realta' l'annuncio precede l'esito.
+PESI_CONCLUSIVI = {
+    "DELIVERED": 3, "RETURN": 3,
+    "STORAGE": 2, "REFUSED": 2, "ADDRESS_ERROR": 2, "ABSENT": 2,
+    "DELIVERY_RETRY": 2, "ACTION_REQUIRED": 2, "COD_ISSUE": 2,
+    "DAMAGE_OR_LOSS": 2, "PICKUP_AT_DEPOT": 2, "RECIPIENT_CLOSED": 2,
+    "CARRIER_DELAY": 2,
+}
+
+
+def peso_conclusivo(categoria: str | None) -> int:
+    return PESI_CONCLUSIVI.get(categoria or "", 1)
+
+
 class SyncEngine:
     def __init__(self, config, db: Database):
         self.config = config
@@ -465,8 +480,17 @@ class SyncEngine:
                     "id": e["id"], "severity": classificazione.severity,
                     "category": classificazione.category, "reason": classificazione.reason,
                 })
-            # Gli eventi arrivano ordinati: l'ultimo visto e' quello corrente.
-            ultimo_per_tracking[e["tracking_number"]] = {"evento": e, "classe": classificazione}
+            # Gli eventi arrivano ordinati per data, ma GLS li data al minuto: due
+            # scansioni dello stesso minuto sono indistinguibili sull'orario. Nel
+            # dato gia' registrato l'ordine di lettura originale e' perduto, quindi
+            # a parita' di minuto vale la sostanza: un esito viene dopo l'annuncio
+            # che lo precede.
+            corrente = ultimo_per_tracking.get(e["tracking_number"])
+            chiave = (str(e.get("event_at") or ""), peso_conclusivo(classificazione.category), int(e["id"]))
+            if corrente is None or chiave >= corrente["chiave"]:
+                ultimo_per_tracking[e["tracking_number"]] = {
+                    "evento": e, "classe": classificazione, "chiave": chiave,
+                }
 
         eventi_aggiornati = self.db.update_event_classifications(aggiornamenti)
 
