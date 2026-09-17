@@ -527,11 +527,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 action_type = str(body.get("action_type") or "").upper().strip()
                 actions = {
                     "CUSTOMER_MESSAGE": ("Messaggio inviato al cliente", "IN_PROGRESS"),
-                    "CUSTOMER_CALLED": ("Cliente contattato", "IN_PROGRESS"),
-                    "GLS_CONTACTED": ("Sede GLS contattata", "IN_PROGRESS"),
-                    "RELEASE_REQUESTED": ("SVINCOLO Ritenta consegna", "IN_PROGRESS"),
+                    "CUSTOMER_CALLED": ("Cliente chiamato", "IN_PROGRESS"),
+                    "GLS_CONTACTED": ("GLS contattato", "IN_PROGRESS"),
+                    # Gli svincoli si mandano a GLS via API, dal riquadro giacenza:
+                    # i due pulsanti che li segnavano soltanto a mano non ci sono
+                    # piu'. Chi lo gestisce fuori dal tool lo registra come nota.
                     "STOCK_MANUAL_HANDLED": ("Giacenza gestita esternamente", "IN_PROGRESS"),
-                    "DELIVERY_RESCHEDULED": ("SVINCOLO Ritorno al mittente", "IN_PROGRESS"),
                     # Scrivere una nota e' prendere in carico la pratica, esattamente
                     # come contattare il cliente o la sede GLS: era l'unica azione a
                     # lasciare la pratica fra quelle ancora da verificare.

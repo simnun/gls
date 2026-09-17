@@ -789,11 +789,9 @@ function drawerHtml(item) {
     </div>
 
     <div class="section-box"><div class="section-title-row"><h3>Registra intervento</h3><span>ogni azione entra nello storico unico</span></div><div class="quick-actions">
-      <button class="quick-action" data-action="CUSTOMER_MESSAGE"><span class="qa-icon">✉</span><span>Messaggio cliente</span></button>
-      <button class="quick-action" data-action="CUSTOMER_CALLED"><span class="qa-icon">☎</span><span>Cliente contattato</span></button>
-      <button class="quick-action" data-action="GLS_CONTACTED"><span class="qa-icon">G</span><span>GLS contattata</span></button>
-      <button class="quick-action primary-action" data-action="RELEASE_REQUESTED"><span class="qa-icon">✓</span><span>SVINCOLO Ritenta consegna</span></button>
-      <button class="quick-action" data-action="DELIVERY_RESCHEDULED"><span class="qa-icon">↩</span><span>SVINCOLO Ritorno al mittente</span></button>
+      <button class="quick-action" data-action="CUSTOMER_MESSAGE"><span class="qa-icon">✉</span><span>Messaggio cliente inviato</span></button>
+      <button class="quick-action" data-action="CUSTOMER_CALLED"><span class="qa-icon">☏</span><span>Cliente chiamato</span></button>
+      <button class="quick-action" data-action="GLS_CONTACTED"><span class="qa-icon">G</span><span>GLS contattato</span></button>
       <button class="quick-action" data-action="NOTE"><span class="qa-icon">＋</span><span>Registra nota</span></button>
     </div><textarea id="quickActionNote" class="action-note" placeholder="Nota opzionale: es. cliente conferma indirizzo, contattata sede GLS…"></textarea></div>
 

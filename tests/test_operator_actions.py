@@ -24,15 +24,15 @@ class OperatorActionTests(unittest.TestCase):
     def test_action_is_persistent_and_updates_workflow(self):
         self.db.add_operator_action(
             'NI123',
-            'RELEASE_REQUESTED',
-            'Svincolo richiesto',
+            'GLS_CONTACTED',
+            'GLS contattato',
             note='Richiesto alla sede',
             operator_name='Simone',
             workflow_status='WAITING_GLS',
         )
         item = self.db.get_shipment('NI123')
         self.assertEqual(item['workflow_status'], 'WAITING_GLS')
-        self.assertEqual(item['last_operator_action'], 'Svincolo richiesto')
+        self.assertEqual(item['last_operator_action'], 'GLS contattato')
         self.assertEqual(item['last_operator_name'], 'Simone')
         self.assertEqual(len(item['operator_actions']), 1)
         self.assertEqual(item['operator_actions'][0]['note'], 'Richiesto alla sede')
