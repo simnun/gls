@@ -504,6 +504,7 @@ function renderKpis() {
   const delivered = rows.filter(x => x.category === 'DELIVERED').length;
   const returned = rows.filter(x => x.category === 'RETURN').length;
   const inConsegna = rows.filter(x => !x.closed && CATEGORIE_IN_CONSEGNA.includes(x.category)).length;
+  const attive = rows.filter(x => !x.closed).length;
   const incons = rows.filter(x => x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)).length;
   $('#kpiVerify').textContent = actionable.length;
   $('#kpiWatch').textContent = watch;
@@ -514,6 +515,8 @@ function renderKpis() {
   $('#tabDeliveredCount').textContent = delivered;
   $('#tabReturnedCount').textContent = returned;
   $('#tabDeliveringCount').textContent = inConsegna;
+  $('#tabActiveCount').textContent = attive;
+  $('#tabAllCount').textContent = rows.length;
   $('#tabInconsistencyCount').textContent = incons;
 }
 
@@ -522,6 +525,7 @@ function filteredShipments() {
   if (state.view === 'action') rows = rows.filter(x => daVerificare(x));
   if (state.view === 'working') rows = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status));
   if (state.view === 'active') rows = rows.filter(x => !x.closed);
+  // 'all' non filtra: ogni spedizione affidata a GLS, esito definitivo compreso.
   if (state.view === 'delivered') rows = rows.filter(x => x.category === 'DELIVERED');
   if (state.view === 'returned') rows = rows.filter(x => x.category === 'RETURN');
   if (state.view === 'delivering') rows = rows.filter(x => !x.closed && CATEGORIE_IN_CONSEGNA.includes(x.category));
@@ -564,7 +568,8 @@ function renderTable() {
   const body = $('#shipmentsBody');
   const empty = $('#emptyState');
   const titles = {
-    action: 'Spedizioni da verificare', working: 'Pratiche in lavorazione', active: 'Tutte le spedizioni GLS attive',
+    action: 'Spedizioni da verificare', working: 'Pratiche in lavorazione',
+    active: 'Tutte le spedizioni GLS ancora in corso', all: 'Tutte le spedizioni affidate a GLS',
     delivered: 'Consegnati al cliente · chiusi', returned: 'Rientrati al mittente · chiusi',
     delivering: 'In viaggio verso il cliente', unknown: 'Nuovi stati GLS'
   };
@@ -600,9 +605,15 @@ function renderTable() {
   }).join('');
   empty.classList.toggle('hidden', rows.length !== 0);
   if (rows.length === 0) renderEmptyState(empty, total);
+  // Nell'archivio completo il metro di paragone e' il totale affidato a GLS,
+  // non le sole spedizioni ancora in corso.
+  const complessive = (state.data?.shipments || []).length;
+  const riferimento = state.view === 'all'
+    ? `${complessive} affidate a GLS`
+    : `${total} GLS attive monitorate`;
   $('#tableMeta').textContent = filtriAttivi()
-    ? `${rows.length} con i filtri attivi · ${total} GLS attive monitorate`
-    : `${rows.length} nella vista corrente · ${total} GLS attive monitorate`;
+    ? `${rows.length} con i filtri attivi · ${riferimento}`
+    : `${rows.length} nella vista corrente · ${riferimento}`;
   $$('[data-open]').forEach(btn => btn.addEventListener('click', () => openDrawer(btn.dataset.open)));
 }
 
@@ -631,7 +642,7 @@ function renderEmptyStateVuota(empty, monitored) {
   // sembra che la sincronizzazione non abbia caricato nulla.
   const nessunDato = monitored === 0;
   const plurale = monitored === 1 ? 'spedizione GLS attiva' : 'spedizioni GLS attive';
-  const vaiATutte = `<button class="btn secondary" type="button" data-goto-view="active">Vedi tutte le spedizioni</button>`;
+  const vaiATutte = `<button class="btn secondary" type="button" data-goto-view="active">Vedi tutte le attive</button>`;
 
   const messaggi = {
     action: nessunDato
@@ -646,11 +657,14 @@ function renderEmptyStateVuota(empty, monitored) {
     delivered: ['Nessuna consegna registrata', 'Qui finiscono le spedizioni consegnate al cliente.'],
     returned: ['Nessun rientro registrato', 'Qui finiscono le spedizioni tornate al mittente.'],
     delivering: ['Nessuna spedizione in viaggio', 'Qui compaiono le spedizioni in transito o in consegna oggi: da seguire, non da gestire.'],
+    all: nessunDato
+      ? ['Nessuna spedizione caricata', 'Premi <b>Aggiorna</b> per la prima sincronizzazione con Shopify e GLS.']
+      : ['Nessuna spedizione', 'Nessuna spedizione affidata a GLS nel periodo selezionato.'],
     unknown: ['Nessuno stato GLS sconosciuto', 'Tutti gli stati ricevuti sono gia' + String.fromCharCode(39) + ' classificati dalle regole.'],
   };
 
   const [titolo, dettaglio] = messaggi[state.view] || ['Niente da mostrare', ''];
-  const mostraPulsante = !nessunDato && state.view !== 'active';
+  const mostraPulsante = !nessunDato && !['active', 'all'].includes(state.view);
   empty.innerHTML = `<div class="empty-icon">✓</div><h3>${titolo}</h3><p>${dettaglio}</p>${mostraPulsante ? `<div class="empty-actions">${vaiATutte}</div>` : ''}`;
   empty.querySelector('[data-goto-view]')?.addEventListener('click', () => switchView('active'));
 }
