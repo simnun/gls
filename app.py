@@ -359,6 +359,10 @@ class AppHandler(BaseHTTPRequestHandler):
                     result["tracking"] = {
                         "numero": tracking,
                         "fonte": tracciato.get("tracking_source"),
+                        # Se siamo finiti sul fallback pubblico c'e' un motivo, e
+                        # quel motivo spiega perche' mancano eventi che sul sito
+                        # GLS si vedono: il canale ufficiale non ha risposto.
+                        "motivo_fallback": _senza_credenziali(tracciato.get("xml_fallback_reason") or ""),
                         "eventi_totali": len(eventi),
                         "eventi": [
                             {k: e.get(k) for k in ("event_at", "code", "state", "note", "location")}
