@@ -70,7 +70,7 @@ def main() -> None:
         "GLS_CUSTOMER_CODE": gls_customer,
         "GLS_CONTRACT_CODE": gls_contract,
         "GLS_PASSWORD": gls_password,
-        "GLS_TRACK_ENDPOINT": old.get("GLS_TRACK_ENDPOINT", "https://wwwdr.gls-italy.com/XML/get_xml_track.php"),
+        "GLS_TRACK_ENDPOINT": old.get("GLS_TRACK_ENDPOINT", "https://www.gls-italy.com/XML/get_xml_track.php"),
         "GLS_LIST_ENDPOINT": old.get("GLS_LIST_ENDPOINT", "https://labelservice.gls-italy.com/ilswebservice.asmx/ListSped"),
         "GLS_RELEASE_ENDPOINT": old.get("GLS_RELEASE_ENDPOINT", "https://labelservice.gls-italy.com/ilswebservice.asmx/ReleaseShipmentStock"),
         "GLS_ACCEPT_UNLABELED_TRACKING": old.get("GLS_ACCEPT_UNLABELED_TRACKING", "true"),

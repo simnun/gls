@@ -6,7 +6,7 @@ import json
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -57,6 +57,15 @@ def child_text(node: ET.Element, name: str) -> str:
     return ""
 
 
+def numero_senza_sede(tracking_number: str, sede: str = "") -> str:
+    """Toglie dal numero di spedizione la sigla della sede di partenza."""
+    numero = str(tracking_number or "").strip()
+    sigla = str(sede or "").strip().upper()
+    if sigla and numero.upper().startswith(sigla) and numero[len(sigla):].isdigit():
+        return numero[len(sigla):]
+    return re.sub(r"^[A-Za-z]+(?=\d)", "", numero)
+
+
 def normalize_event_at(date_text: str, time_text: str) -> str | None:
     raw = " ".join(x.strip() for x in [date_text or "", time_text or ""] if x and x.strip())
     if not raw:
@@ -73,6 +82,26 @@ def normalize_event_at(date_text: str, time_text: str) -> str | None:
             return datetime.strptime(raw, fmt).replace(tzinfo=ROME).isoformat(timespec="seconds")
         except ValueError:
             continue
+
+    # Il tracking XML di GLS usa l'anno a due cifre e non riporta i minuti oltre
+    # il sessantesimo: "17/09/26 06:63" e' le 07:03 del 17 settembre 2026.
+    # Senza questa lettura ogni evento resterebbe testo grezzo, quindi senza
+    # ordine cronologico e senza eta' su cui calcolare le scadenze.
+    giorno = re.match(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})", raw)
+    if giorno:
+        d, m, a = (int(giorno.group(i)) for i in (1, 2, 3))
+        if a < 100:
+            a += 2000
+        try:
+            momento = datetime(a, m, d, tzinfo=ROME)
+        except ValueError:
+            return raw
+        orario = re.search(r"(\d{1,2}):(\d{1,3})(?::(\d{1,3}))?", raw[giorno.end():])
+        if orario:
+            minuti = int(orario.group(1)) * 60 + int(orario.group(2))
+            secondi = int(orario.group(3) or 0)
+            momento += timedelta(minutes=minuti, seconds=secondi)
+        return momento.isoformat(timespec="seconds")
     return raw
 
 
@@ -334,7 +363,10 @@ class GLSClient:
             raise GLSError("GLS Track & Trace non configurato")
         params = {
             "locpartenza": self.config.gls_site,
-            "numsped": tracking_number,
+            # Il numero va passato senza la sigla della sede di partenza:
+            # "NI665031172" e' la spedizione 665031172 partita da NI, e con la
+            # sigla attaccata GLS risponde "Spedizione non trovata".
+            "numsped": numero_senza_sede(tracking_number, self.config.gls_site),
         }
         if self.config.gls_contract_code:
             params["CodCli"] = self.config.gls_contract_code
@@ -542,16 +574,19 @@ class GLSClient:
             "code": top.get("code", ""),
         }
 
-        # Top-level values are authoritative when present.
-        if top.get("status"):
-            current_event = dict(current_event)
-            current_event["state"] = top["status"]
-        if top.get("note"):
-            current_event = dict(current_event)
-            current_event["note"] = top["note"]
-        if top.get("code"):
-            current_event = dict(current_event)
-            current_event["code"] = top["code"]
+        # I campi di testata (StatoSpedizione, Note, Codice) sono un riassunto
+        # grezzo e spesso vecchio: "Non consegnato" con la nota della giacenza di
+        # ieri resta li' anche quando l'ultima scansione dice che oggi il collo
+        # esce in consegna. Riempiono quindi solo i vuoti dell'ultimo evento, non
+        # lo sovrascrivono, altrimenti la novita' andrebbe persa.
+        # La nota di testata non viene mai riportata sull'ultimo evento: resta
+        # ferma alla scansione precedente ("IN ATTESA DI ISTRUZIONI" della
+        # giacenza di ieri) e riporterebbe la spedizione in giacenza anche dopo
+        # che GLS l'ha rimessa in consegna.
+        current_event = dict(current_event)
+        for chiave, valore in (("state", top.get("status")), ("code", top.get("code"))):
+            if valore and not (current_event.get(chiave) or "").strip():
+                current_event[chiave] = valore
 
         return {**top, "events": events, "current_event": current_event}
 

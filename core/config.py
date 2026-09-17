@@ -200,7 +200,7 @@ def get_config() -> Config:
         gls_customer_code=env_str("GLS_CUSTOMER_CODE"),
         gls_contract_code=env_str("GLS_CONTRACT_CODE"),
         gls_password=env_str("GLS_PASSWORD"),
-        gls_track_endpoint=env_str("GLS_TRACK_ENDPOINT", "https://wwwdr.gls-italy.com/XML/get_xml_track.php"),
+        gls_track_endpoint=env_str("GLS_TRACK_ENDPOINT", "https://www.gls-italy.com/XML/get_xml_track.php"),
         gls_list_endpoint=env_str("GLS_LIST_ENDPOINT", "https://labelservice.gls-italy.com/ilswebservice.asmx/ListSped"),
         gls_release_endpoint=env_str("GLS_RELEASE_ENDPOINT", "https://labelservice.gls-italy.com/ilswebservice.asmx/ReleaseShipmentStock"),
         gls_accept_unlabeled_tracking=env_bool("GLS_ACCEPT_UNLABELED_TRACKING", False),
