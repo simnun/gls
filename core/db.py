@@ -16,6 +16,8 @@ def utcnow() -> str:
 WORKFLOW_ALLOWED = {"NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS", "RESOLVED", "IGNORED"}
 # Stati in cui un operatore ha la pratica in mano.
 IN_LAVORAZIONE = {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}
+# Il collo si sta muovendo verso il cliente: nessun intervento da fare.
+CATEGORIE_IN_MOVIMENTO = {"OUT_FOR_DELIVERY", "SCHEDULED", "IN_TRANSIT", "CORRESPONDENT", "SERVICE_AREA"}
 
 
 class Database:
@@ -747,6 +749,11 @@ class Database:
                        SET active=0, resolved_at=?, last_seen_at=?
                        WHERE tracking_number=? AND active=1""",
                     (now, now, tracking_number),
+                )
+                # Pratica chiusa: non resta nessuna novita' da leggere.
+                conn.execute(
+                    "UPDATE shipments SET unread_event_at=NULL WHERE tracking_number=?",
+                    (tracking_number,),
                 )
 
             status_changed = current["workflow_status"] != workflow_status

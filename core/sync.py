@@ -9,7 +9,7 @@ from datetime import datetime, time as dt_time, timedelta, timezone
 from typing import Any
 
 from .classifier import Classifier
-from .db import IN_LAVORAZIONE, Database
+from .db import CATEGORIE_IN_MOVIMENTO, IN_LAVORAZIONE, Database
 from .gls import GLSClient
 from .shopify import ShopifyClient
 
@@ -610,6 +610,12 @@ class SyncEngine:
                     None,
                     "Sistema",
                 )
+        elif in_carico and not issues and classification.category in CATEGORIE_IN_MOVIMENTO:
+            # Il lavoro dell'operatore ha prodotto il suo effetto: GLS ha rimesso
+            # il collo in viaggio. La pratica non ha piu' bisogno di una persona e
+            # segue la spedizione. Se la giornata finisce male, il nuovo evento
+            # grave la riportera' da capo in DA VERIFICARE.
+            self.db.update_workflow(shipment["tracking_number"], "RESOLVED", None, "Sistema")
         elif new_event_added and (classification.severity in {"WARNING", "CRITICAL"} or issues):
             if in_carico:
                 self.db.segna_novita_gls(shipment["tracking_number"], current.get("event_at"))

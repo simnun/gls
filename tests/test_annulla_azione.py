@@ -84,3 +84,25 @@ class AnnullaAzioneTests(unittest.TestCase):
         a = self.azione("CUSTOMER_CALLED", "Cliente contattato")
         with self.assertRaises(ValueError):
             self.db.elimina_azione_operatore("NI2", a["id"])
+
+
+class PraticaChiusaDalMovimentoTests(unittest.TestCase):
+    """Quando GLS rimette il collo in viaggio il lavoro dell'operatore ha
+    prodotto il suo effetto: la pratica non ha piu' bisogno di una persona."""
+
+    def setUp(self):
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        self.db.upsert_shipment({"tracking_number": "NI1"})
+
+    def test_la_chiusura_spegne_anche_l_avviso_di_novita(self):
+        self.db.update_workflow("NI1", "IN_PROGRESS", "svincolo inviato", "Daniela")
+        self.db.segna_novita_gls("NI1", "2026-09-17T07:03:00+02:00")
+        self.db.update_workflow("NI1", "RESOLVED", None, "Sistema")
+        riga = self.db.get_shipment("NI1")
+        self.assertEqual(riga["workflow_status"], "RESOLVED")
+        self.assertIsNone(riga["unread_event_at"])
+
+    def test_un_nuovo_guaio_puo_riaprire_la_pratica(self):
+        self.db.update_workflow("NI1", "RESOLVED", None, "Sistema")
+        self.db.update_workflow("NI1", "NEW", None, "Sistema")
+        self.assertEqual(self.db.get_shipment("NI1")["workflow_status"], "NEW")
