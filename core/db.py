@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -762,6 +763,58 @@ class Database:
                     note=(operator_note or "")[:4000] if note_changed else "",
                     operator_name=operator_name,
                 )
+
+    def ripristina_lavorazioni_annullate(self) -> list[dict[str, Any]]:
+        """Rimette in lavorazione le pratiche che il sistema aveva riportato indietro.
+
+        Finche' il difetto e' stato attivo, ogni nuovo evento grave riscriveva a
+        NEW il lavoro dell'operatore. Qui si recupera solo dove la sequenza e'
+        inequivocabile: l'ultimo passaggio scelto da una persona porta in
+        lavorazione e dopo di lui hanno scritto soltanto righe di sistema.
+        """
+        ripristinate: list[dict[str, Any]] = []
+        with self.connect() as conn:
+            candidate = conn.execute(
+                "SELECT tracking_number FROM shipments WHERE workflow_status='NEW' AND closed=0"
+            ).fetchall()
+            for riga in candidate:
+                tracking = riga["tracking_number"]
+                azioni = conn.execute(
+                    """SELECT action_label, operator_name FROM operator_actions
+                       WHERE tracking_number=? AND action_type='WORKFLOW'
+                       ORDER BY created_at DESC, id DESC LIMIT 12""",
+                    (tracking,),
+                ).fetchall()
+                voluto = None
+                for azione in azioni:
+                    operatore = (azione["operator_name"] or "").strip().lower()
+                    etichetta = azione["action_label"] or ""
+                    destinazione = re.search(r"Stato pratica:\s*\w+\s*→\s*(\w+)", etichetta)
+                    destinazione = destinazione.group(1) if destinazione else ""
+                    if operatore in {"", "sistema"}:
+                        # Solo i ritorni automatici a NEW si possono scavalcare.
+                        if destinazione == "NEW":
+                            continue
+                        break
+                    if destinazione in {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}:
+                        voluto = destinazione
+                    break
+                if not voluto:
+                    continue
+                conn.execute(
+                    "UPDATE shipments SET workflow_status=?, workflow_updated_at=? WHERE tracking_number=?",
+                    (voluto, utcnow(), tracking),
+                )
+                self._insert_action_conn(
+                    conn,
+                    tracking_number=tracking,
+                    action_type="WORKFLOW",
+                    action_label=f"Stato pratica: NEW → {voluto} · ripristino automatico",
+                    note="La pratica era stata riportata indietro dal sistema nonostante il lavoro dell'operatore.",
+                    operator_name="Sistema",
+                )
+                ripristinate.append({"tracking_number": tracking, "workflow_status": voluto})
+        return ripristinate
 
     def segna_novita_gls(self, tracking_number: str, event_at: str | None) -> None:
         """Segnala che GLS ha aggiornato una pratica gia' presa in carico.

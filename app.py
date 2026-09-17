@@ -421,6 +421,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 result = ENGINE.reclassify_history()
                 return self._json(result)
 
+            if path == "/api/maintenance/ripristina-lavorazioni":
+                # Recupera le pratiche che il sistema aveva riportato a DA
+                # VERIFICARE cancellando il lavoro dell'operatore.
+                ripristinate = DB.ripristina_lavorazioni_annullate()
+                return self._json({"ok": True, "ripristinate": len(ripristinate),
+                                   "pratiche": ripristinate[:50]})
+
             if path == "/api/sync":
                 if CONFIG.serverless:
                     result = ENGINE.run_sync()

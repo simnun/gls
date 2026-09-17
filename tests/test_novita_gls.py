@@ -34,3 +34,41 @@ class NovitaGLSTests(unittest.TestCase):
         self.db.segna_novita_gls("NI1", "2026-09-17T07:03:00+02:00")
         self.db.update_workflow("NI1", "IN_PROGRESS", "sentito GLS, riconsegna lunedi", "Simone")
         self.assertIsNone(self.db.get_shipment("NI1")["unread_event_at"])
+
+
+class RipristinoLavorazioniTests(unittest.TestCase):
+    """Le pratiche riportate indietro dal sistema tornano in lavorazione,
+    quelle mai prese in carico restano dove sono."""
+
+    def setUp(self):
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+
+    def pratica(self, tracking):
+        self.db.upsert_shipment({"tracking_number": tracking})
+
+    def test_recupera_la_pratica_riportata_indietro(self):
+        self.pratica("NI1")
+        self.db.update_workflow("NI1", "IN_PROGRESS", "in attesa di GLS", "Daniela")
+        self.db.update_workflow("NI1", "NEW", None, "Sistema")
+        self.assertEqual(len(self.db.ripristina_lavorazioni_annullate()), 1)
+        self.assertEqual(self.db.get_shipment("NI1")["workflow_status"], "IN_PROGRESS")
+
+    def test_non_tocca_chi_non_e_mai_stato_preso_in_carico(self):
+        self.pratica("NI2")
+        self.db.update_workflow("NI2", "NEW", None, "Sistema")
+        self.assertEqual(self.db.ripristina_lavorazioni_annullate(), [])
+        self.assertEqual(self.db.get_shipment("NI2")["workflow_status"], "NEW")
+
+    def test_rispetta_chi_ha_riaperto_la_pratica_di_persona(self):
+        self.pratica("NI3")
+        self.db.update_workflow("NI3", "IN_PROGRESS", "presa in carico", "Simone")
+        self.db.update_workflow("NI3", "NEW", None, "Simone")
+        self.assertEqual(self.db.ripristina_lavorazioni_annullate(), [])
+        self.assertEqual(self.db.get_shipment("NI3")["workflow_status"], "NEW")
+
+    def test_conserva_lo_stato_di_attesa_scelto_dall_operatore(self):
+        self.pratica("NI4")
+        self.db.update_workflow("NI4", "WAITING_GLS", "svincolo inviato", "Aldo")
+        self.db.update_workflow("NI4", "NEW", None, "Sistema")
+        self.db.ripristina_lavorazioni_annullate()
+        self.assertEqual(self.db.get_shipment("NI4")["workflow_status"], "WAITING_GLS")
