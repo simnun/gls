@@ -9,7 +9,7 @@ from datetime import datetime, time as dt_time, timedelta, timezone
 from typing import Any
 
 from .classifier import Classifier
-from .db import Database
+from .db import IN_LAVORAZIONE, Database
 from .gls import GLSClient
 from .shopify import ShopifyClient
 
@@ -138,9 +138,6 @@ def technical_error_info(message: str) -> dict[str, Any]:
     return {
         "code": code, "title": title, "hint": hint, "attempts": attempts, "message": raw,
     }
-
-
-IN_LAVORAZIONE = {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}
 
 
 class SyncEngine:

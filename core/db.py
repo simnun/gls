@@ -14,6 +14,8 @@ def utcnow() -> str:
 
 
 WORKFLOW_ALLOWED = {"NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS", "RESOLVED", "IGNORED"}
+# Stati in cui un operatore ha la pratica in mano.
+IN_LAVORAZIONE = {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}
 
 
 class Database:
@@ -780,9 +782,8 @@ class Database:
             for riga in candidate:
                 tracking = riga["tracking_number"]
                 azioni = conn.execute(
-                    """SELECT action_label, operator_name FROM operator_actions
-                       WHERE tracking_number=? AND action_type='WORKFLOW'
-                       ORDER BY created_at DESC, id DESC LIMIT 12""",
+                    """SELECT action_type, action_label, operator_name FROM operator_actions
+                       WHERE tracking_number=? ORDER BY created_at DESC, id DESC LIMIT 20""",
                     (tracking,),
                 ).fetchall()
                 voluto = None
@@ -796,8 +797,14 @@ class Database:
                         if destinazione == "NEW":
                             continue
                         break
-                    if destinazione in {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}:
-                        voluto = destinazione
+                    if azione["action_type"] == "WORKFLOW":
+                        # L'operatore ha scelto lui lo stato: si rispetta quello.
+                        if destinazione in IN_LAVORAZIONE:
+                            voluto = destinazione
+                    else:
+                        # Una telefonata, un messaggio, uno svincolo: la pratica
+                        # era in lavorazione, anche senza un cambio di stato esplicito.
+                        voluto = "IN_PROGRESS"
                     break
                 if not voluto:
                     continue

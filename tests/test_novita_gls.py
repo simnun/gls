@@ -72,3 +72,26 @@ class RipristinoLavorazioniTests(unittest.TestCase):
         self.db.update_workflow("NI4", "NEW", None, "Sistema")
         self.db.ripristina_lavorazioni_annullate()
         self.assertEqual(self.db.get_shipment("NI4")["workflow_status"], "WAITING_GLS")
+
+
+class RipristinoDaAzioniTests(unittest.TestCase):
+    """Chi prende in carico una pratica di solito fa un'azione concreta,
+    non cambia lo stato a mano: anche quel lavoro va riconosciuto."""
+
+    def setUp(self):
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        self.db.upsert_shipment({"tracking_number": "NI1"})
+
+    def test_una_telefonata_al_cliente_vale_come_presa_in_carico(self):
+        self.db.add_operator_action("NI1", "CUSTOMER_CALLED", "Cliente contattato",
+                                    "", "Daniela", workflow_status="IN_PROGRESS")
+        self.db.update_workflow("NI1", "NEW", None, "Sistema")
+        self.assertEqual(len(self.db.ripristina_lavorazioni_annullate()), 1)
+        self.assertEqual(self.db.get_shipment("NI1")["workflow_status"], "IN_PROGRESS")
+
+    def test_una_pratica_chiusa_dall_operatore_non_viene_riaperta(self):
+        self.db.add_operator_action("NI1", "CUSTOMER_CALLED", "Cliente contattato",
+                                    "", "Daniela", workflow_status="IN_PROGRESS")
+        self.db.update_workflow("NI1", "RESOLVED", None, "Daniela")
+        self.db.update_workflow("NI1", "NEW", None, "Sistema")
+        self.assertEqual(self.db.ripristina_lavorazioni_annullate(), [])
