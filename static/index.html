@@ -11,14 +11,14 @@
   <header class="app-header">
     <div class="brand-block">
       <div class="brand-mark">G</div>
-      <div><div class="eyebrow">ZUIKI · OPERATIONS</div><h1>GLS Monitor</h1><p>Eccezioni, giacenze, interventi e incongruenze in un'unica coda operativa.</p></div>
+      <div><div class="eyebrow">ZUIKI · OPERATIONS</div><h1>GLS Monitor</h1><p>Eccezioni, giacenze e interventi in un'unica coda operativa.</p></div>
     </div>
     <div class="header-actions">
       <label id="operatorField" class="operator-field" title="Il nome viene memorizzato solo in questo browser"><span>Operatore</span><input id="operatorInput" type="text" maxlength="60" placeholder="Il tuo nome" autocomplete="name"></label>
       <div id="sessionBox" class="session-box hidden"><span id="sessionName"></span><button id="logoutBtn" class="btn ghost" type="button">Esci</button></div>
       <span id="connectionBadge" class="status-chip neutral"><span class="status-dot"></span> Caricamento…</span>
       <button id="diagnosticsBtn" class="btn ghost">Diagnostica</button>
-      <button id="syncBtn" class="btn primary"><span class="btn-icon">↻</span> Aggiorna</button>
+      <div class="sync-action"><button id="syncBtn" class="btn primary"><span class="btn-icon">↻</span> Aggiorna</button><span id="lastSync" class="last-sync">Mai aggiornato</span></div>
     </div>
   </header>
 
@@ -40,7 +40,6 @@
       <button class="metric-card danger" data-view-target="action"><span class="metric-icon">!</span><span class="metric-copy"><small>Da verificare</small><strong id="kpiVerify">0</strong><em>tutte le priorità operative</em></span></button>
       <button class="metric-card watch" data-severity="WATCH"><span class="metric-icon">◷</span><span class="metric-copy"><small>Osservazione</small><strong id="kpiWatch">0</strong><em>monitor automatico</em></span></button>
       <button class="metric-card progress" data-view-target="working"><span class="metric-icon">✓</span><span class="metric-copy"><small>In lavorazione</small><strong id="kpiWorking">0</strong><em>pratiche già prese in carico</em></span></button>
-      <button class="metric-card danger-soft" data-view-target="inconsistencies"><span class="metric-icon">⚠</span><span class="metric-copy"><small>Incongruenze</small><strong id="kpiInconsistencies">0</strong><em>priorità massima</em></span></button>
     </section>
 
     <section class="workspace-card">
@@ -53,11 +52,9 @@
           <button class="tab delivered-tab" data-view="delivered"><span>Consegnati</span><b id="tabDeliveredCount">0</b></button>
           <button class="tab delivering-tab" data-view="delivering"><span>In consegna</span><b id="tabDeliveringCount">0</b></button>
           <button class="tab returned-tab" data-view="returned"><span>Rientrati</span><b id="tabReturnedCount">0</b></button>
-          <button class="tab" data-view="inconsistencies"><span>Incongruenze</span><b id="tabInconsistencyCount">0</b></button>
           <button class="tab" data-view="stocks"><span>Storico giacenze</span><b id="tabStockCount">0</b></button>
         </nav>
         <div class="workspace-tools">
-          <div id="lastSync" class="last-sync">Mai aggiornato</div>
           <div class="settings-menu">
             <button id="settingsBtn" class="settings-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Impostazioni">⚙</button>
             <div id="settingsPanel" class="settings-panel hidden" role="menu">
@@ -99,20 +96,6 @@
         </div>
       </section>
 
-      <section id="inconsistencyPanel" class="table-section hidden">
-        <div class="section-heading">
-          <div><h2>Incongruenze operative GLS</h2><p id="inconsistencyMeta">Confronto automatico tra tracking, giacenze e istruzioni degli operatori.</p></div>
-          <a class="btn danger-btn" href="/api/inconsistencies/export.xlsx">Scarica Excel per GLS</a>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table inconsistency-table">
-            <colgroup><col style="width:12%"><col style="width:12%"><col style="width:16%"><col style="width:25%"><col style="width:25%"><col style="width:10%"></colgroup>
-            <thead><tr><th><button class="sort-head inc-sort" data-sort="priority">Priorità <span></span></button></th><th><button class="sort-head inc-sort" data-sort="order">Ordine <span></span></button></th><th><button class="sort-head inc-sort" data-sort="customer">Cliente <span></span></button></th><th><button class="sort-head inc-sort" data-sort="issue">Incongruenza <span></span></button></th><th><button class="sort-head inc-sort" data-sort="detected">Rilevata <span></span></button></th><th>Gestisci</th></tr></thead>
-            <tbody id="inconsistencyBody"></tbody>
-          </table>
-          <div id="inconsistencyEmpty" class="empty-state hidden"><div class="empty-icon">✓</div><h3>Nessuna incongruenza attiva</h3><p>Le anomalie logiche verranno evidenziate automaticamente.</p></div>
-        </div>
-      </section>
 
       <section id="stockPanel" class="table-section hidden">
         <div class="stock-summary-grid"><div class="stock-summary-card"><span>Giacenze totali</span><strong id="stockTotal">0</strong></div><div class="stock-summary-card danger"><span>Ancora aperte</span><strong id="stockOpen">0</strong></div><div class="stock-summary-card worked"><span>Gestite dal team</span><strong id="stockHandled">0</strong></div><div class="stock-summary-card success"><span>Consegnate dopo gestione</span><strong id="stockDelivered">0</strong></div><div class="stock-summary-card"><span>Rientrate</span><strong id="stockReturned">0</strong></div></div>

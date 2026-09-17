@@ -1033,9 +1033,12 @@ class Database:
             shipments = []
             for r in rows:
                 item = self._shipment_row(dict(r))
+                # Le incongruenze continuano a essere rilevate e conservate, ma non
+                # governano piu' la priorita': la gravita' e' quella dell'ultimo
+                # stato GLS, che e' cio' che l'operatore legge in elenco.
                 item["inconsistency_count"] = int(item.get("inconsistency_count") or 0)
                 item["has_inconsistency"] = item["inconsistency_count"] > 0
-                item["effective_severity"] = "CRITICAL" if item["has_inconsistency"] else item.get("severity", "WATCH")
+                item["effective_severity"] = item.get("severity", "WATCH")
                 shipments.append(item)
             counts = {s: 0 for s in ["CRITICAL", "WARNING", "WATCH", "INFO", "NORMAL"]}
             workflow: dict[str, int] = {}

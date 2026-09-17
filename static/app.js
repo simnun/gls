@@ -21,9 +21,6 @@ const state = {
   sortDir: 'desc',
   stockSortKey: 'entered',
   stockSortDir: 'desc',
-  inconsistencyData: [],
-  inconsistencySortKey: 'detected',
-  inconsistencySortDir: 'desc',
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -113,7 +110,7 @@ function daVerificare(row) {
   // in coda non dice a nessuno cosa fare.
   if (!row || row.closed || row.workflow_status !== 'NEW') return false;
   const gravita = row.effective_severity || row.severity;
-  return Boolean(row.has_inconsistency) || ['CRITICAL', 'WARNING'].includes(gravita);
+  return ['CRITICAL', 'WARNING'].includes(gravita);
 }
 
 function statoGestione(row) {
@@ -175,7 +172,6 @@ function pastigliaGestione(row) {
 }
 
 function priorityRank(row) {
-  if (row.has_inconsistency) return 6;
   return {CRITICAL:5, WARNING:4, WATCH:3, INFO:2, NORMAL:1}[row.effective_severity || row.severity] || 0;
 }
 function cmpText(a,b) { return String(a ?? '').localeCompare(String(b ?? ''), 'it', {numeric:true, sensitivity:'base'}); }
@@ -427,9 +423,6 @@ async function loadDashboard({quiet = false} = {}) {
   try {
     const data = await api('/api/dashboard?include_closed=true');
     state.data = data;
-    // Si disegna subito con i dati appena arrivati. Le incongruenze si caricano
-    // dopo, senza bloccare: se quella chiamata fosse lenta o fallisse, prima
-    // restava tutto vuoto e i contatori a zero pur avendo i dati in mano.
     renderSession();
     aggiornaTendinaStati();
     renderKpis();
@@ -441,7 +434,6 @@ async function loadDashboard({quiet = false} = {}) {
       setSyncBusy(true);
       startSyncPolling();
     }
-    loadInconsistencies({quiet:true}).then(() => { renderKpis(); renderTable(); });
     if (data.sync_running) startSyncPolling();
   } catch (err) {
     if (!quiet) showNotice(`Errore caricamento dashboard: ${err.message}`);
@@ -505,11 +497,9 @@ function renderKpis() {
   const returned = rows.filter(x => x.category === 'RETURN').length;
   const inConsegna = rows.filter(x => !x.closed && CATEGORIE_IN_CONSEGNA.includes(x.category)).length;
   const attive = rows.filter(x => !x.closed).length;
-  const incons = rows.filter(x => x.has_inconsistency && !['RESOLVED','IGNORED'].includes(x.workflow_status)).length;
   $('#kpiVerify').textContent = actionable.length;
   $('#kpiWatch').textContent = watch;
   $('#kpiWorking').textContent = working;
-  $('#kpiInconsistencies').textContent = incons;
   $('#tabActionCount').textContent = actionable.length;
   $('#tabWorkingCount').textContent = working;
   $('#tabDeliveredCount').textContent = delivered;
@@ -517,7 +507,6 @@ function renderKpis() {
   $('#tabDeliveringCount').textContent = inConsegna;
   $('#tabActiveCount').textContent = attive;
   $('#tabAllCount').textContent = rows.length;
-  $('#tabInconsistencyCount').textContent = incons;
 }
 
 function filteredShipments() {
@@ -545,7 +534,7 @@ function filteredShipments() {
     rows = rows.filter(x => [
       x.order_name, x.customer_name, x.customer_email, x.customer_phone, x.tracking_number,
       x.gls_status, x.gls_note, x.gls_code, x.city, x.gls_destination_city,
-      x.last_operator_action, x.last_operator_name, x.inconsistency_titles
+      x.last_operator_action, x.last_operator_name
     ].some(v => String(v || '').toLowerCase().includes(q)));
   }
   rows = sortRows(rows, state.sortKey, state.sortDir, (key,a,b) => {
@@ -563,7 +552,7 @@ function filteredShipments() {
 }
 
 function renderTable() {
-  if (['rules','stocks','inconsistencies'].includes(state.view)) return;
+  if (['rules','stocks'].includes(state.view)) return;
   const rows = filteredShipments();
   const body = $('#shipmentsBody');
   const empty = $('#emptyState');
@@ -580,7 +569,7 @@ function renderTable() {
     const skipped = Number(last.skipped_closed || 0);
     $('#lastSync').textContent = `Ultimo sync ${formatDate(last.finished_at)}${skipped ? ` · ${skipped} finali escluse` : ''}`;
   } else { $('#lastSync').textContent = 'Mai aggiornato'; }
-  updateSortIndicators('.sort-head:not(.stock-sort):not(.inc-sort)', state.sortKey, state.sortDir);
+  updateSortIndicators('.sort-head:not(.stock-sort)', state.sortKey, state.sortDir);
 
   body.innerHTML = rows.map(row => {
     const current = row.gls_status || 'Stato GLS non disponibile';
@@ -591,13 +580,12 @@ function renderTable() {
       ? `<div class="activity-box"><div class="activity-label">${esc(row.last_operator_action)}</div><div class="activity-meta">${esc(row.last_operator_name || 'Operatore')} · ${esc(age(row.last_operator_action_at))}</div></div>`
       : `<div class="no-activity">Nessuna azione registrata</div>`;
     const location = [row.city, row.province].filter(Boolean).join(' · ') || '—';
-    const issueBadge = row.has_inconsistency ? `<div class="inconsistency-mini">⚠ ${row.inconsistency_count} incongruenza${row.inconsistency_count===1?'':'e'}</div>` : '';
     return `
-      <tr class="shipment-row ${esc(sev)} ${hasAction ? 'has-action' : ''} ${row.has_inconsistency ? 'has-inconsistency' : ''}">
-        <td><span class="priority-pill ${esc(sev)}">${esc(severityLabels[sev] || sev)}</span>${issueBadge}</td>
+      <tr class="shipment-row ${esc(sev)} ${hasAction ? 'has-action' : ''}">
+        <td><span class="priority-pill ${esc(sev)}">${esc(severityLabels[sev] || sev)}</span></td>
         <td><div class="order-main">${esc(row.order_name || '—')}</div><div class="cell-sub">${esc(formatDate(row.order_created_at, false))} · ${esc(formatMoney(row.total_amount, row.currency))}${row.is_cod ? ' · COD' : ''}</div><div class="tracking-code">${esc(row.tracking_number)}</div></td>
         <td><div class="customer-main">${esc(row.customer_name || 'Cliente non disponibile')}</div><div class="cell-sub">${esc(location)}</div></td>
-        <td><div class="event-title">${esc(current)}</div>${note ? `<div class="event-note" title="${esc(note)}">${esc(note)}</div>` : ''}${row.has_inconsistency ? `<div class="cell-alert">${esc(row.inconsistency_titles || '')}</div>` : ''}</td>
+        <td><div class="event-title">${esc(current)}</div>${note ? `<div class="event-note" title="${esc(note)}">${esc(note)}</div>` : ''}</td>
         <td><div>${esc(age(row.gls_event_at))}</div><div class="cell-sub">${esc(formatDate(row.gls_event_at))}</div></td>
         <td>${pastigliaNovita(row)}${pastigliaGestione(row)}<span class="workflow-pill ${esc(row.workflow_status)}">${esc(workflowLabels[row.workflow_status] || row.workflow_status)}</span>${activity}</td>
         <td><button class="row-btn" data-open="${esc(row.tracking_number)}">Gestisci →</button></td>
@@ -669,44 +657,6 @@ function renderEmptyStateVuota(empty, monitored) {
   empty.querySelector('[data-goto-view]')?.addEventListener('click', () => switchView('active'));
 }
 
-async function loadInconsistencies({quiet=false} = {}) {
-  try {
-    const data = await api('/api/inconsistencies');
-    state.inconsistencyData = data.items || [];
-    renderInconsistencies();
-  } catch (err) {
-    if (!quiet) showToast(`Incongruenze non disponibili: ${err.message}`, true);
-  }
-}
-
-function renderInconsistencies() {
-  const panel = $('#inconsistencyBody');
-  if (!panel) return;
-  let rows = [...(state.inconsistencyData || [])];
-  rows = sortRows(rows, state.inconsistencySortKey, state.inconsistencySortDir, (key,a,b) => {
-    const map = {
-      priority:[0,0,'number'],
-      order:[orderNumeric(a.order_name),orderNumeric(b.order_name),'number'],
-      customer:[a.customer_name,b.customer_name,'text'],
-      issue:[a.title,b.title,'text'],
-      detected:[a.detected_at,b.detected_at,'date'],
-    };
-    return map[key] || map.detected;
-  });
-  updateSortIndicators('.inc-sort', state.inconsistencySortKey, state.inconsistencySortDir);
-  $('#inconsistencyMeta').textContent = `${rows.length} incongruenze attive · tutte hanno priorità massima`;
-  panel.innerHTML = rows.map(x => `<tr class="shipment-row CRITICAL has-inconsistency">
-    <td><span class="priority-pill CRITICAL">MASSIMA</span></td>
-    <td><div class="order-main">${esc(x.order_name || '—')}</div><div class="tracking-code">${esc(x.tracking_number)}</div></td>
-    <td><div class="customer-main">${esc(x.customer_name || '—')}</div><div class="cell-sub">${esc(x.customer_phone || '')}</div></td>
-    <td><div class="event-title">${esc(x.title || x.issue_code)}</div><div class="event-note always-wrap">${esc(x.detail || '')}</div><div class="cell-alert">${esc(x.suggested_action || '')}</div></td>
-    <td><strong>${esc(formatDate(x.detected_at))}</strong><div class="cell-sub">${esc(x.gls_status || '')}</div></td>
-    <td><button class="row-btn" data-open-inc="${esc(x.tracking_number)}">Gestisci →</button></td>
-  </tr>`).join('');
-  $('#inconsistencyEmpty').classList.toggle('hidden', rows.length !== 0);
-  $$('[data-open-inc]').forEach(btn => btn.addEventListener('click', () => openDrawer(btn.dataset.openInc)));
-}
-
 async function openDrawer(tracking) {
   state.selectedTracking = tracking;
   try {
@@ -732,7 +682,6 @@ function drawerHtml(item) {
   const events = item.events || [];
   const actions = item.operator_actions || [];
   const links = item.links || {};
-  const issues = (item.inconsistencies || []).filter(x => Number(x.active || 0) === 1);
   const eventCode = item.gls_code || '';
   const sev = item.effective_severity || item.severity;
   const contactPhone = item.customer_phone ? `<a href="tel:${esc(item.customer_phone)}">${esc(item.customer_phone)}</a>` : '—';
@@ -771,12 +720,6 @@ function drawerHtml(item) {
         <span>${esc(formatDate(item.unread_event_at))} · ${esc(item.gls_status || 'Nuovo evento GLS')}${item.gls_note ? ` · ${esc(item.gls_note)}` : ''}</span>
         <em>La pratica \u00e8 rimasta in lavorazione: l'avviso sparisce quando salvi una nota o registri un'azione.</em>
       </div>
-    </div>` : '';
-
-  const issueBox = issues.length ? `
-    <div class="inconsistency-banner">
-      <div class="section-title-row"><h3>⚠ Incongruenze rilevate</h3><span>PRIORITÀ MASSIMA</span></div>
-      ${issues.map(i => `<div class="issue-card"><strong>${esc(i.title)}</strong><p>${esc(i.detail || '')}</p><em>${esc(i.suggested_action || '')}</em></div>`).join('')}
     </div>` : '';
 
   const classificationBox = eventCode ? `
@@ -823,7 +766,7 @@ function drawerHtml(item) {
 
   return `
     <div class="status-card ${esc(sev)}"><span class="priority-pill ${esc(sev)}">${esc(severityLabels[sev] || sev)}</span><h3>${esc(item.gls_status || 'Stato GLS non disponibile')}</h3>${item.gls_note ? `<p>${esc(item.gls_note)}</p>` : ''}${item.reason ? `<p class="muted" style="margin-top:7px">${esc(item.reason)}</p>` : ''}</div>
-    ${newsBanner}${issueBox}${internalBanner}
+    ${newsBanner}${internalBanner}
 
     <div class="detail-grid">
       <div class="detail-item"><label>Ordine Shopify</label><strong>${esc(item.order_name || '—')}</strong><div class="muted">${esc(formatMoney(item.total_amount, item.currency))} · ${esc(formatDate(item.order_created_at, false))}</div></div>
@@ -1127,7 +1070,6 @@ async function diagnostics() {
 async function renderRules() {
   $('#shipmentsPanel').classList.add('hidden');
   $('#stockPanel').classList.add('hidden');
-  $('#inconsistencyPanel').classList.add('hidden');
   $('#rulesPanel').classList.remove('hidden');
   $('#filters').classList.add('hidden');
   try {
@@ -1189,12 +1131,10 @@ function switchView(view) {
   $$('.settings-item').forEach(v => v.classList.toggle('active', v.dataset.view === view));
   $('#rulesPanel').classList.add('hidden');
   $('#stockPanel').classList.add('hidden');
-  $('#inconsistencyPanel').classList.add('hidden');
   $('#shipmentsPanel').classList.add('hidden');
   $('#filters').classList.add('hidden');
   if (view === 'rules') return renderRules();
   if (view === 'stocks') { $('#stockPanel').classList.remove('hidden'); loadStockHistory({quiet:true}); return; }
-  if (view === 'inconsistencies') { $('#inconsistencyPanel').classList.remove('hidden'); loadInconsistencies({quiet:true}); return; }
   $('#shipmentsPanel').classList.remove('hidden');
   $('#filters').classList.remove('hidden');
   renderTable();
@@ -1263,7 +1203,7 @@ function bind() {
   });
   $$('.quick-dates button').forEach(btn => btn.addEventListener('click', () => setQuickDate(Number(btn.dataset.days))));
   $('#resetFilters').addEventListener('click', resetFilters);
-  $$('.sort-head:not(.stock-sort):not(.inc-sort)').forEach(btn => btn.addEventListener('click', () => {
+  $$('.sort-head:not(.stock-sort)').forEach(btn => btn.addEventListener('click', () => {
     const key = btn.dataset.sort;
     if (state.sortKey === key) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
     else { state.sortKey = key; state.sortDir = key === 'customer' || key === 'status' || key === 'workflow' ? 'asc' : 'desc'; }
@@ -1274,12 +1214,6 @@ function bind() {
     if (state.stockSortKey === key) state.stockSortDir = state.stockSortDir === 'asc' ? 'desc' : 'asc';
     else { state.stockSortKey = key; state.stockSortDir = key === 'customer' || key === 'activity' || key === 'current' ? 'asc' : 'desc'; }
     renderStockHistory();
-  }));
-  $$('.inc-sort').forEach(btn => btn.addEventListener('click', () => {
-    const key = btn.dataset.sort;
-    if (state.inconsistencySortKey === key) state.inconsistencySortDir = state.inconsistencySortDir === 'asc' ? 'desc' : 'asc';
-    else { state.inconsistencySortKey = key; state.inconsistencySortDir = key === 'customer' || key === 'issue' ? 'asc' : 'desc'; }
-    renderInconsistencies();
   }));
   $('#stockSearch').addEventListener('input', e => { state.stockSearch = e.target.value.trim(); renderStockHistory(); });
   $('#stockOutcomeFilter').addEventListener('change', e => { state.stockOutcome = e.target.value; renderStockHistory(); });

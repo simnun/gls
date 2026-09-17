@@ -589,11 +589,10 @@ class SyncEngine:
             new_event_added = new_event_added or inserted
 
         self.db.reconcile_stock_cases(shipment["tracking_number"])
-        issues = self.db.reconcile_inconsistencies(shipment["tracking_number"])
+        # Le incongruenze restano registrate per consultazione, ma non decidono
+        # piu' lo stato di una pratica: a guidarla e' l'ultimo stato GLS.
+        self.db.reconcile_inconsistencies(shipment["tracking_number"])
 
-        # Stati finali puliti vengono archiviati automaticamente nei tab dedicati.
-        # Se l'esito finale genera un'incongruenza logica (es. rientro non richiesto),
-        # la pratica resta DA VERIFICARE finche un operatore non la chiude esplicitamente.
         # Una pratica gia' presa in carico non torna indietro da sola: l'operatore
         # ha gia' fatto la sua parte e sta aspettando GLS. Riportarla a DA
         # VERIFICARE cancellerebbe il suo lavoro senza dirgli cosa fare di nuovo.
@@ -601,22 +600,14 @@ class SyncEngine:
         in_carico = (self.db.get_shipment(shipment["tracking_number"]) or {}).get("workflow_status") in IN_LAVORAZIONE
 
         if classification.category in {"DELIVERED", "RETURN"}:
-            if issues and in_carico:
-                self.db.segna_novita_gls(shipment["tracking_number"], current.get("event_at"))
-            else:
-                self.db.update_workflow(
-                    shipment["tracking_number"],
-                    "NEW" if issues else "RESOLVED",
-                    None,
-                    "Sistema",
-                )
-        elif in_carico and not issues and classification.category in CATEGORIE_IN_MOVIMENTO:
+            self.db.update_workflow(shipment["tracking_number"], "RESOLVED", None, "Sistema")
+        elif in_carico and classification.category in CATEGORIE_IN_MOVIMENTO:
             # Il lavoro dell'operatore ha prodotto il suo effetto: GLS ha rimesso
             # il collo in viaggio. La pratica non ha piu' bisogno di una persona e
             # segue la spedizione. Se la giornata finisce male, il nuovo evento
             # grave la riportera' da capo in DA VERIFICARE.
             self.db.update_workflow(shipment["tracking_number"], "RESOLVED", None, "Sistema")
-        elif new_event_added and (classification.severity in {"WARNING", "CRITICAL"} or issues):
+        elif new_event_added and classification.severity in {"WARNING", "CRITICAL"}:
             if in_carico:
                 self.db.segna_novita_gls(shipment["tracking_number"], current.get("event_at"))
             else:
@@ -731,14 +722,9 @@ class SyncEngine:
                 }
             )
             self.db.reconcile_stock_cases(item["tracking_number"])
-            issues = self.db.reconcile_inconsistencies(item["tracking_number"])
+            self.db.reconcile_inconsistencies(item["tracking_number"])
             if classification.category in {"DELIVERED", "RETURN"}:
-                self.db.update_workflow(
-                    item["tracking_number"],
-                    "NEW" if issues else "RESOLVED",
-                    None,
-                    "Sistema",
-                )
+                self.db.update_workflow(item["tracking_number"], "RESOLVED", None, "Sistema")
             self._set_progress(
                 phase="DEMO",
                 label=f"Caricamento demo {idx} di {total}…",
