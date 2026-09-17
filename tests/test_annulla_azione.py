@@ -106,3 +106,26 @@ class PraticaChiusaDalMovimentoTests(unittest.TestCase):
         self.db.update_workflow("NI1", "RESOLVED", None, "Sistema")
         self.db.update_workflow("NI1", "NEW", None, "Sistema")
         self.assertEqual(self.db.get_shipment("NI1")["workflow_status"], "NEW")
+
+
+class AnnullaSaltandoIlSistemaTests(unittest.TestCase):
+    """Il sistema scrive i suoi passaggi di stato ma non compare nello storico:
+    la croce resta sull'ultima operazione fatta da una persona."""
+
+    def setUp(self):
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        self.db.upsert_shipment({"tracking_number": "NI1"})
+
+    def test_si_cancella_anche_se_il_sistema_ha_scritto_dopo(self):
+        azione = self.db.add_operator_action("NI1", "CUSTOMER_CALLED", "Cliente contattato",
+                                             "", "Daniela", workflow_status="IN_PROGRESS")
+        self.db.update_workflow("NI1", "RESOLVED", None, "Sistema")
+        esito = self.db.elimina_azione_operatore("NI1", azione["id"])
+        self.assertEqual(esito["workflow_status"], "NEW")
+
+    def test_le_righe_del_sistema_non_si_possono_cancellare(self):
+        self.db.update_workflow("NI1", "IN_PROGRESS", None, "Sistema")
+        with self.db.connect() as conn:
+            riga = conn.execute("SELECT id FROM operator_actions ORDER BY id DESC LIMIT 1").fetchone()
+        with self.assertRaises(ValueError):
+            self.db.elimina_azione_operatore("NI1", riga["id"])

@@ -722,8 +722,6 @@ function drawerHtml(item) {
       </div>
     </div>` : '';
 
-  const classificationBox = eventCode ? `
-    <div class="section-box"><div class="classify-box"><strong>Classifica codice GLS ${esc(eventCode)}</strong><div class="muted">Questa scelta avrà precedenza sulle regole testuali.</div><div class="classify-grid"><select id="classSeverity">${['NORMAL','INFO','WATCH','WARNING','CRITICAL'].map(s => `<option value="${s}" ${s===item.severity?'selected':''}>${esc(severityLabels[s] || s)}</option>`).join('')}</select><input id="classCategory" value="${esc(item.category || 'UNCLASSIFIED')}" placeholder="Categoria, es. ADDRESS_ERROR"></div><div class="link-row"><button id="saveClassBtn" class="btn secondary">Salva classificazione</button></div></div></div>` : '';
 
   const stockCases = item.stock_cases || [];
   const latestStock = stockCases[0] || null;
@@ -755,13 +753,17 @@ function drawerHtml(item) {
       <div class="release-actions"><button id="sendReleaseBtn" class="btn primary">Invia istruzione a GLS</button><button class="btn secondary quick-action-inline" data-action="STOCK_MANUAL_HANDLED">Registra gestione fatta fuori dal tool</button></div>
     </div>` : '';
 
+  // Lo storico racconta cosa ha fatto GLS e cosa hanno fatto le persone. I
+  // passaggi di stato decisi dal sistema sono meccanica interna: restano
+  // registrati, ma non affollano la lettura.
+  const azioniUmane = actions.filter(a => (a.operator_name || '').trim().toLowerCase() !== 'sistema');
   // La croce compare solo sull'ultima operazione registrata: si torna indietro
   // un passo per volta, senza poter riscrivere lo storico a meta'.
-  const ultimaAzioneId = actions.length ? actions[0].id : null;
+  const ultimaAzioneId = azioniUmane.length ? azioniUmane[0].id : null;
 
   const combined = [
     ...events.map(ev => ({when: ev.event_at || ev.created_at, source:'GLS', severity:ev.severity || 'WATCH', title:ev.state || 'Evento GLS', note:ev.note || '', meta:[ev.location, ev.code ? `codice ${ev.code}` : ''].filter(Boolean).join(' · ')})),
-    ...actions.map(a => ({when:a.created_at, source:'TEAM', severity:'TEAM', title:a.action_label || a.action_type, note:a.note || '', meta:a.operator_name || 'Operatore', actionId:a.id})),
+    ...azioniUmane.map(a => ({when:a.created_at, source:'TEAM', severity:'TEAM', title:a.action_label || a.action_type, note:a.note || '', meta:a.operator_name || 'Operatore', actionId:a.id})),
   ].sort((a,b) => (new Date(b.when || 0).getTime()||0) - (new Date(a.when || 0).getTime()||0));
 
   return `
@@ -801,8 +803,7 @@ function drawerHtml(item) {
 
     <div class="section-box"><div class="section-title-row"><h3>Storico completo</h3><span>GLS + attività operatori · ${combined.length} eventi</span></div><div class="timeline combined-timeline">
       ${combined.length ? combined.map(e => `<div class="timeline-item ${e.source==='TEAM'?'team':esc(e.severity)}">${e.actionId && e.actionId === ultimaAzioneId ? `<button class="undo-action" type="button" data-undo-action="${e.actionId}" title="Cancella questa operazione: \u00e8 l\u2019ultima registrata da un operatore">\u00d7</button>` : ''}<div class="timeline-time"><span class="source-badge ${e.source==='TEAM'?'team':'gls'}">${e.source}</span> ${esc(formatDate(e.when))}${e.meta ? ` · ${esc(e.meta)}` : ''}</div><div class="timeline-state">${esc(e.title)}</div>${e.note ? `<div class="timeline-note">${esc(e.note)}</div>` : ''}</div>`).join('') : '<div class="muted">Nessuno storico disponibile.</div>'}
-    </div></div>
-    ${classificationBox}`;
+    </div></div>`;
 }
 
 function bindDrawer(item) {
@@ -937,17 +938,6 @@ function bindDrawer(item) {
     } catch (err) { showToast(err.message, true); }
   });
 
-  $('#saveClassBtn')?.addEventListener('click', async () => {
-    try {
-      await api('/api/classification', { method:'POST', body:JSON.stringify({
-        event_code: item.gls_code,
-        severity: $('#classSeverity').value,
-        category: $('#classCategory').value.trim().toUpperCase(),
-        recommended_action: item.recommended_action || ''
-      })});
-      showToast('Codice GLS classificato. Verrà applicato al prossimo aggiornamento.');
-    } catch (err) { showToast(err.message, true); }
-  });
 }
 
 function setSyncBusy(busy) {

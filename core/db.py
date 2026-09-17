@@ -844,13 +844,17 @@ class Database:
             ).fetchone()
             if not azione:
                 raise ValueError("Operazione non trovata")
+            # Le righe del sistema non compaiono nello storico e non contano:
+            # la croce sta sull'ultima operazione fatta da una persona, anche se
+            # dopo di lei il sistema ha scritto un passaggio di stato.
             ultima = conn.execute(
                 """SELECT id FROM operator_actions WHERE tracking_number=?
+                   AND LOWER(TRIM(COALESCE(operator_name,''))) NOT IN ('', 'sistema')
                    ORDER BY created_at DESC, id DESC LIMIT 1""",
                 (tracking_number,),
             ).fetchone()
             if not ultima or int(ultima["id"]) != int(action_id):
-                raise ValueError("Si puo' cancellare solo l'ultima operazione registrata")
+                raise ValueError("Si puo' cancellare solo l'ultima operazione registrata da un operatore")
 
             conn.execute("DELETE FROM operator_actions WHERE id=?", (action_id,))
 
