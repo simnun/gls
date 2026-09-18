@@ -16,6 +16,15 @@ def utcnow() -> str:
 WORKFLOW_ALLOWED = {"NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS", "RESOLVED", "IGNORED"}
 # Stati in cui un operatore ha la pratica in mano.
 IN_LAVORAZIONE = {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}
+# Il collo e' fermo in sede e GLS aspetta istruzioni dal mittente: e' una
+# giacenza, comunque il tracking la chiami. GLS scrive "giacenza" solo in alcuni
+# casi, ma "indirizzo errato, contatta il mittente per programmare la riconsegna"
+# descrive esattamente la stessa situazione, e nel gestionale GLS quelle
+# spedizioni compaiono nell'elenco giacenze insieme alle altre.
+CATEGORIE_GIACENZA = {
+    "STORAGE", "ADDRESS_ERROR", "REFUSED", "ABSENT", "ACTION_REQUIRED",
+    "PICKUP_AT_DEPOT", "RECIPIENT_CLOSED",
+}
 # Il collo si sta muovendo verso il cliente: nessun intervento da fare.
 CATEGORIE_IN_MOVIMENTO = {"OUT_FOR_DELIVERY", "SCHEDULED", "IN_TRANSIT", "CORRESPONDENT", "SERVICE_AREA"}
 
@@ -1219,7 +1228,7 @@ class Database:
             for row in events:
                 e = dict(row)
                 category = (e.get("category") or "").upper()
-                if category == "STORAGE":
+                if category in CATEGORIE_GIACENZA:
                     # A new STORAGE after a previous confirmed exit is a new episode.
                     if current is None:
                         current = {"entry": e, "first_exit": None, "final": e}
