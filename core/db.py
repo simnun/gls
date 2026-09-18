@@ -1307,6 +1307,36 @@ class Database:
                     ),
                 )
 
+            # Allargando le cause che aprono una giacenza, un episodio che prima
+            # cominciava da "spedizione in giacenza" ora comincia dall'evento che
+            # l'ha causata, giorni prima. La riga vecchia resterebbe aperta per
+            # sempre e la stessa giacenza risulterebbe contata due volte.
+            attuali = [ep["entry"].get("event_hash") for ep in episodes]
+            segnaposto = ",".join("?" for _ in attuali) or "NULL"
+            orfane = conn.execute(
+                f"""SELECT id FROM stock_cases
+                    WHERE tracking_number=? AND entry_event_hash NOT IN ({segnaposto})""",
+                (tracking_number, *attuali),
+            ).fetchall()
+            for orfana in orfane:
+                collegata = conn.execute(
+                    "SELECT 1 FROM gls_release_requests WHERE stock_case_id=? LIMIT 1",
+                    (orfana["id"],),
+                ).fetchone()
+                if collegata:
+                    # Porta con se' istruzioni gia' inviate a GLS: si chiude, non
+                    # si cancella, cosi' lo storico dello svincolo resta leggibile.
+                    conn.execute(
+                        """UPDATE stock_cases
+                           SET status='CLOSED', exited_at=COALESCE(exited_at,?),
+                               outcome_state=COALESCE(outcome_state,'Episodio confluito nella giacenza in corso'),
+                               updated_at=?
+                           WHERE id=?""",
+                        (now, now, orfana["id"]),
+                    )
+                else:
+                    conn.execute("DELETE FROM stock_cases WHERE id=?", (orfana["id"],))
+
     def reconcile_all_stock_cases(self) -> int:
         with self.connect() as conn:
             rows = conn.execute(

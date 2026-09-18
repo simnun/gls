@@ -64,3 +64,40 @@ class GiacenzaOltreLaParolaTests(unittest.TestCase):
         casi = self.giacenze()
         self.assertEqual(len(casi), 1)
         self.assertEqual(casi[0]["status"], "CLOSED")
+
+
+class NessunDoppioneDiGiacenzaTests(unittest.TestCase):
+    """Una giacenza che comincia dall'indirizzo errato e prosegue fino
+    all'evento "in giacenza" resta un episodio solo, non due."""
+
+    def setUp(self):
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        self.db.upsert_shipment({"tracking_number": "NI1"})
+
+    def evento(self, quando, stato, categoria):
+        self.db.insert_event({
+            "tracking_number": "NI1", "event_hash": quando, "event_at": quando,
+            "code": "", "state": stato, "note": "", "location": "",
+            "severity": "CRITICAL", "category": categoria, "reason": "", "raw": {},
+        })
+
+    def test_l_episodio_resta_uno_solo(self):
+        self.evento("2026-09-17T08:41:00+02:00", "Consegna prevista oggi", "OUT_FOR_DELIVERY")
+        self.evento("2026-09-17T12:00:00+02:00", "Indirizzo errato", "ADDRESS_ERROR")
+        self.evento("2026-09-18T10:49:00+02:00", "Spedizione in giacenza", "STORAGE")
+        self.db.reconcile_stock_cases("NI1")
+        casi = self.db.get_shipment("NI1").get("stock_cases") or []
+        self.assertEqual(len(casi), 1)
+        self.assertEqual(casi[0]["status"], "OPEN")
+        self.assertIn("Indirizzo errato", casi[0]["entry_state"])
+
+    def test_una_riga_vecchia_scollegata_viene_ripulita(self):
+        # Come si presentava il dato creato dalla versione precedente.
+        self.evento("2026-09-18T10:49:00+02:00", "Spedizione in giacenza", "STORAGE")
+        self.db.reconcile_stock_cases("NI1")
+        self.assertEqual(len(self.db.get_shipment("NI1").get("stock_cases") or []), 1)
+        self.evento("2026-09-17T12:00:00+02:00", "Indirizzo errato", "ADDRESS_ERROR")
+        self.db.reconcile_stock_cases("NI1")
+        casi = self.db.get_shipment("NI1").get("stock_cases") or []
+        self.assertEqual(len(casi), 1)
+        self.assertIn("Indirizzo errato", casi[0]["entry_state"])
