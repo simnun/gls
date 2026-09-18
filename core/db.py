@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .classifier import normalize_text
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -16,15 +18,28 @@ def utcnow() -> str:
 WORKFLOW_ALLOWED = {"NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS", "RESOLVED", "IGNORED"}
 # Stati in cui un operatore ha la pratica in mano.
 IN_LAVORAZIONE = {"IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS"}
-# Il collo e' fermo in sede e GLS aspetta istruzioni dal mittente: e' una
-# giacenza, comunque il tracking la chiami. GLS scrive "giacenza" solo in alcuni
-# casi, ma "indirizzo errato, contatta il mittente per programmare la riconsegna"
-# descrive esattamente la stessa situazione, e nel gestionale GLS quelle
-# spedizioni compaiono nell'elenco giacenze insieme alle altre.
-CATEGORIE_GIACENZA = {
-    "STORAGE", "ADDRESS_ERROR", "REFUSED", "ABSENT", "ACTION_REQUIRED",
-    "PICKUP_AT_DEPOT", "RECIPIENT_CLOSED",
-}
+# GLS scrive "giacenza" solo per alcune cause, ma quando il collo e' fermo in
+# sede lo dice sempre allo stesso modo: chiede istruzioni al mittente. E'
+# quella richiesta a distinguere una giacenza da un tentativo che GLS ripete da
+# sola ("ritenteremo", "la consegna e' prevista"), dove non c'e' niente da
+# svincolare. Riconoscere le parole invece delle categorie fa si' che un testo
+# nuovo di GLS venga capito subito, senza aspettare che qualcuno lo classifichi.
+MARCATORI_GIACENZA = (
+    "programmare la riconsegna",
+    "in attesa di istruzioni",
+    "istruzioni dal mittente",
+    "disponibile per il ritiro",
+    "richiesto il ritiro",
+)
+
+
+def apre_giacenza(stato: str | None, nota: str | None = "", categoria: str | None = "") -> bool:
+    """Dice se l'evento lascia il collo fermo in sede, in attesa di istruzioni."""
+    testo = normalize_text(" ".join(x for x in (stato, nota) if x))
+    if any(m in testo for m in MARCATORI_GIACENZA):
+        return True
+    # Rete di sicurezza: una giacenza dichiarata vale anche se il testo cambia.
+    return (categoria or "").upper() == "STORAGE"
 # Il collo si sta muovendo verso il cliente: nessun intervento da fare.
 CATEGORIE_IN_MOVIMENTO = {"OUT_FOR_DELIVERY", "SCHEDULED", "IN_TRANSIT", "CORRESPONDENT", "SERVICE_AREA"}
 
@@ -1228,7 +1243,7 @@ class Database:
             for row in events:
                 e = dict(row)
                 category = (e.get("category") or "").upper()
-                if category in CATEGORIE_GIACENZA:
+                if apre_giacenza(e.get("state"), e.get("note"), category):
                     # A new STORAGE after a previous confirmed exit is a new episode.
                     if current is None:
                         current = {"entry": e, "first_exit": None, "final": e}
