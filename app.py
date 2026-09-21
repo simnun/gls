@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hmac
 import json
 import mimetypes
@@ -191,14 +192,35 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         return False
 
-    def _json(self, payload, status=200) -> None:
-        raw = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+    # Sotto questa soglia comprimere costa piu' di quanto rende.
+    SOGLIA_COMPRESSIONE = 1024
+
+    def _comprimibile(self) -> bool:
+        return "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+
+    def _scrivi(self, raw: bytes, intestazioni: list[tuple[str, str]], status: int = 200) -> None:
+        """Invia la risposta, compressa quando conviene e il browser la accetta.
+
+        L'elenco spedizioni pesa quasi due megabyte in chiaro e il pannello lo
+        ricarica a ogni azione: senza compressione la banda si esaurisce in
+        pochi giorni. In gzip lo stesso elenco scende sotto i duecento kilobyte.
+        """
+        if len(raw) >= self.SOGLIA_COMPRESSIONE and self._comprimibile():
+            compresso = gzip.compress(raw, 6)
+            if len(compresso) < len(raw):
+                raw = compresso
+                intestazioni = [*intestazioni, ("Content-Encoding", "gzip"), ("Vary", "Accept-Encoding")]
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
+        for nome, valore in intestazioni:
+            self.send_header(nome, valore)
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def _json(self, payload, status=200) -> None:
+        raw = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+        self._scrivi(raw, [("Content-Type", "application/json; charset=utf-8"),
+                           ("Cache-Control", "no-store")], status)
 
     def _bytes(self, payload: bytes, content_type: str, filename: str | None = None, status: int = 200) -> None:
         self.send_response(status)
@@ -600,12 +622,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         raw = target.read_bytes()
         content_type, _ = mimetypes.guess_type(str(target))
-        self.send_response(200)
-        self.send_header("Content-Type", (content_type or "application/octet-stream") + ("; charset=utf-8" if content_type and content_type.startswith("text/") else ""))
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
+        tipo = (content_type or "application/octet-stream")
+        if content_type and content_type.startswith("text/"):
+            tipo += "; charset=utf-8"
+        self._scrivi(raw, [("Content-Type", tipo), ("Cache-Control", "no-cache")])
 
     def _handle_status(self) -> None:
         """Stato dell'installazione, senza rivelare alcun segreto.
