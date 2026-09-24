@@ -23,6 +23,7 @@ from core.sync import _parse_iso
 from core.config import get_config
 from core.wsgi import make_wsgi_app
 from core.db import Database
+from core.timezones import ROME
 from core.sync import SyncEngine
 from core.xlsx_export import build_xlsx
 
@@ -73,6 +74,20 @@ ENGINE = _Pigro(lambda: SyncEngine(CONFIG, DB.risolvi()))
 def _senza_credenziali(testo: str) -> str:
     """Toglie le credenziali dagli URL prima di mostrare un messaggio d'errore."""
     return re.sub(r"(://)[^/\s:@]+:[^/\s@]+@", r"\1***:***@", str(testo))
+
+
+def _momento_build() -> str:
+    """Quando e' stata messa online questa versione, in ora italiana.
+
+    Render non espone la data del deploy alle applicazioni, ma ricrea il disco
+    a ogni rilascio: la data del file dell'applicazione e' quindi il momento in
+    cui questa versione e' arrivata sul server.
+    """
+    try:
+        istante = datetime.fromtimestamp(Path(__file__).stat().st_mtime, tz=timezone.utc)
+        return istante.astimezone(ROME).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return ""
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -638,6 +653,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
         stato: dict = {
             "ok": True,
+            "build": _momento_build(),
             "python": sys.version.split()[0],
             "tzdata": tzdata_available(),
             "serverless": CONFIG.serverless,

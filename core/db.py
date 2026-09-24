@@ -98,6 +98,8 @@ class Database:
                     fulfillment_updated_at TEXT,
                     gls_checked_at TEXT,
                     unread_event_at TEXT,
+                    order_cancelled_at TEXT,
+                    replaced_by_carrier TEXT,
                     customer_gid TEXT,
                     customer_legacy_id TEXT,
                     customer_name TEXT,
@@ -298,6 +300,8 @@ class Database:
             "fulfillment_updated_at": "TEXT",
             "gls_checked_at": "TEXT",
             "unread_event_at": "TEXT",
+            "order_cancelled_at": "TEXT",
+            "replaced_by_carrier": "TEXT",
         }
         for name, decl in additions.items():
             if name not in cols:
@@ -561,6 +565,8 @@ class Database:
                 "is_cod": 1 if data.get("is_cod") else 0,
                 "shopify_financial_status": data.get("shopify_financial_status"),
                 "shopify_fulfillment_status": data.get("shopify_fulfillment_status"),
+                "order_cancelled_at": data.get("order_cancelled_at"),
+                "replaced_by_carrier": data.get("replaced_by_carrier"),
                 "gls_status": data.get("gls_status"),
                 "gls_note": data.get("gls_note"),
                 "gls_code": data.get("gls_code"),
@@ -610,7 +616,7 @@ class Database:
         "customer_legacy_id", "customer_name", "customer_email", "customer_phone",
         "city", "province", "total_amount", "currency", "payment_gateways",
         "is_cod", "shopify_financial_status", "shopify_fulfillment_status",
-        "last_seen_at",
+        "order_cancelled_at", "replaced_by_carrier", "last_seen_at",
     )
 
     @staticmethod
@@ -636,6 +642,8 @@ class Database:
             "is_cod": 1 if data.get("is_cod") else 0,
             "shopify_financial_status": data.get("shopify_financial_status"),
             "shopify_fulfillment_status": data.get("shopify_fulfillment_status"),
+            "order_cancelled_at": data.get("order_cancelled_at"),
+            "replaced_by_carrier": data.get("replaced_by_carrier"),
             "gls_status": "In attesa di controllo GLS",
             "gls_note": "Spedizione rilevata su Shopify; il tracking GLS verra' interrogato alla prossima sincronizzazione.",
             "severity": "INFO",

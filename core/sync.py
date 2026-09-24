@@ -155,6 +155,33 @@ def peso_conclusivo(categoria: str | None) -> int:
     return PESI_CONCLUSIVI.get(categoria or "", 1)
 
 
+def motivo_spedizione_decaduta(shipment: dict[str, Any]) -> dict[str, str] | None:
+    """Dice se una spedizione senza scansioni e' ormai priva di seguito.
+
+    Vale solo per i tracking mai partiti: l'etichetta e' stata creata e poi
+    l'ordine e' stato annullato, oppure il collo e' stato affidato a un altro
+    corriere. In entrambi i casi GLS non pubblichera' mai nulla.
+    """
+    if shipment.get("gls_event_at"):
+        return None
+    corriere = str(shipment.get("replaced_by_carrier") or "").strip()
+    if corriere:
+        return {
+            "categoria": "REPLACED_CARRIER",
+            "stato": f"Spedizione affidata a {corriere}",
+            "nota": ("L'etichetta GLS e' stata creata ma l'ordine e' partito con un altro "
+                     "corriere: questo tracking non avra' seguito."),
+        }
+    if str(shipment.get("order_cancelled_at") or "").strip():
+        return {
+            "categoria": "ORDER_CANCELLED",
+            "stato": "Ordine annullato su Shopify",
+            "nota": ("L'etichetta GLS e' stata creata ma l'ordine e' stato annullato prima "
+                     "del ritiro: il collo non e' mai stato affidato al corriere."),
+        }
+    return None
+
+
 class SyncEngine:
     def __init__(self, config, db: Database):
         self.config = config
@@ -649,6 +676,30 @@ class SyncEngine:
             if value not in (None, "", [], {}):
                 merged[key] = value
         merged["tracking_number"] = tracking
+
+        # Una spedizione senza nemmeno una scansione, su un ordine annullato o
+        # ripartito con un altro corriere, non partira' mai: GLS non pubblichera'
+        # altro e resterebbe in coda per sempre. Si chiude da sola. Se invece il
+        # collo ha gia' viaggiato non tocchiamo niente: l'annullamento arriva
+        # spesso dopo, a reso concluso, e quella storia va conservata com'e'.
+        motivo = motivo_spedizione_decaduta(merged)
+        if motivo:
+            self.db.upsert_shipment({
+                **merged,
+                "gls_status": motivo["stato"],
+                "gls_note": motivo["nota"],
+                "gls_code": "", "gls_location": "", "gls_event_at": None,
+                "severity": "NORMAL",
+                "category": motivo["categoria"],
+                "reason": motivo["nota"],
+                "recommended_action": "Nessuna azione: la spedizione non partira'.",
+                "closed": True,
+                "source": "shopify+gls",
+                "gls_checked_at": datetime.now(timezone.utc).isoformat(),
+            })
+            self.db.update_workflow(tracking, "RESOLVED", None, "Sistema")
+            return motivo["categoria"]
+
         state = no_events_pickup_state(merged)
         if state["pending"]:
             row = {

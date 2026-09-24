@@ -33,6 +33,9 @@
            border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:15px}
     .error.show{display:block}
     .foot{margin-top:18px;color:var(--muted);font-size:11.5px;line-height:1.5}
+    /* Discreta, in fondo alla pagina: dice a quando e' aggiornata la piattaforma. */
+    .build-info{position:fixed;left:0;right:0;bottom:14px;margin:0;text-align:center;
+                font-size:11px;color:rgba(255,255,255,.42)}
   </style>
 </head>
 <body>
@@ -98,5 +101,15 @@
       }
     });
   </script>
+  <script>
+    // Quando e' stata messa online questa versione: serve a capire a colpo
+    // d'occhio se si sta guardando l'ultima, senza chiedere a nessuno.
+    fetch('/api/status').then(r => r.json()).then(d => {
+      if (!d.build) return;
+      const nota = document.getElementById('buildInfo');
+      if (nota) nota.textContent = 'Aggiornato al ' + d.build;
+    }).catch(() => {});
+  </script>
+  <p id="buildInfo" class="build-info"></p>
 </body>
 </html>

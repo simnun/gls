@@ -94,6 +94,8 @@ class ShopifyClient:
               name
               createdAt
               updatedAt
+              cancelledAt
+              cancelReason
               displayFinancialStatus
               displayFulfillmentStatus
               totalPriceSet { shopMoney { amount currencyCode } }
@@ -130,6 +132,8 @@ class ShopifyClient:
               name
               createdAt
               updatedAt
+              cancelledAt
+              cancelReason
               displayFinancialStatus
               displayFulfillmentStatus
               totalPriceSet { shopMoney { amount currencyCode } }
@@ -182,24 +186,29 @@ class ShopifyClient:
         seen: set[str] = set()
         for order in orders:
             fulfillments = order.get("fulfillments") or []
+            # Spedizioni affidate a un altro corriere: se sono state create dopo
+            # quella GLS, quella GLS e' stata sostituita e non partira' mai.
+            altri_corrieri = [
+                (f.get("createdAt") or "", str(t.get("company") or "").strip())
+                for f in fulfillments
+                if str(f.get("status") or "").upper() != "CANCELLED"
+                for t in (f.get("trackingInfo") or [])
+                if t.get("number") and not self._e_gls(t)
+            ]
             for fulfillment in fulfillments:
+                # Una spedizione annullata in Shopify non esiste piu': il numero
+                # resta scritto nell'ordine ma il collo non verra' mai ritirato.
+                if str(fulfillment.get("status") or "").upper() == "CANCELLED":
+                    continue
                 for tracking in fulfillment.get("trackingInfo") or []:
                     number = str(tracking.get("number") or "").strip()
                     if not number or number in seen:
                         continue
                     company = str(tracking.get("company") or "").strip()
                     url = str(tracking.get("url") or "").strip()
-                    company_l = company.lower()
-                    url_l = url.lower()
                     # Store multi-corriere: accettiamo solo tracking esplicitamente GLS.
                     # Nessuna euristica sul formato del numero, per evitare falsi positivi.
-                    is_gls = (
-                        "gls" in company_l
-                        or "general logistics systems" in company_l
-                        or "gls-italy.com" in url_l
-                        or "gls-group.com" in url_l
-                    )
-                    if not is_gls:
+                    if not self._e_gls(tracking):
                         if not self.config.gls_accept_unlabeled_tracking:
                             continue
                         # Compatibilita opzionale: tracking senza corriere esplicito.
@@ -243,6 +252,21 @@ class ShopifyClient:
                             "is_cod": is_cod,
                             "shopify_financial_status": order.get("displayFinancialStatus"),
                             "shopify_fulfillment_status": order.get("displayFulfillmentStatus"),
+                            "order_cancelled_at": order.get("cancelledAt"),
+                            "replaced_by_carrier": next(
+                                (nome for quando, nome in altri_corrieri
+                                 if nome and quando > (fulfillment.get("createdAt") or "")),
+                                "",
+                            ),
                         }
                     )
         return result
+
+    @staticmethod
+    def _e_gls(tracking: dict[str, Any]) -> bool:
+        company = str(tracking.get("company") or "").lower()
+        url = str(tracking.get("url") or "").lower()
+        return ("gls" in company
+                or "general logistics systems" in company
+                or "gls-italy.com" in url
+                or "gls-group.com" in url)
