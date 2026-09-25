@@ -787,6 +787,22 @@ class Database:
                     "UPDATE shipments SET unread_event_at=NULL WHERE tracking_number=?",
                     (tracking_number,),
                 )
+                # Su un tracking che GLS non ha mai mosso, la parola dell'operatore
+                # e' l'unica conclusione possibile: non arrivera' nessun evento a
+                # dichiararla finita, e la spedizione resterebbe fra le attive per
+                # sempre. Dove invece il collo viaggia davvero, resta attiva: la
+                # pratica e' chiusa da noi, la spedizione no.
+                conn.execute(
+                    "UPDATE shipments SET closed=1 WHERE tracking_number=? AND gls_event_at IS NULL",
+                    (tracking_number,),
+                )
+            else:
+                # Riaprendo la pratica torna attiva anche la spedizione, ma solo
+                # se a chiuderla era stata la mano dell'operatore.
+                conn.execute(
+                    "UPDATE shipments SET closed=0 WHERE tracking_number=? AND gls_event_at IS NULL",
+                    (tracking_number,),
+                )
 
             status_changed = current["workflow_status"] != workflow_status
             note_changed = operator_note is not None and (current["operator_note"] or "") != operator_note
@@ -960,6 +976,21 @@ class Database:
                 )
                 corrette += 1
         return corrette
+
+    def concludi_pratiche_chiuse_senza_eventi(self) -> int:
+        """Porta fuori dalle attive le spedizioni mai mosse e gia' archiviate.
+
+        Sono pratiche che un operatore aveva chiuso quando la chiusura valeva
+        solo per il lavoro interno: la spedizione restava contata fra quelle in
+        corso pur non avendo nulla da attendere.
+        """
+        with self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE shipments SET closed=1
+                   WHERE closed=0 AND gls_event_at IS NULL
+                     AND workflow_status IN ('RESOLVED','IGNORED')"""
+            )
+            return int(cur.rowcount or 0)
 
     def ordini_da_ricontrollare(self) -> list[str]:
         """Gli ordini delle spedizioni aperte che non hanno mai avuto un evento.

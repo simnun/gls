@@ -463,8 +463,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 # VERIFICARE cancellando il lavoro dell'operatore.
                 ripristinate = DB.ripristina_lavorazioni_annullate()
                 ricalcolate = DB.ricalcola_ultima_attivita()
+                concluse = DB.concludi_pratiche_chiuse_senza_eventi()
                 return self._json({"ok": True, "ripristinate": len(ripristinate),
                                    "attivita_ricalcolate": ricalcolate,
+                                   "pratiche_concluse": concluse,
                                    "pratiche": ripristinate[:50]})
 
             if path == "/api/sync":
