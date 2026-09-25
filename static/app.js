@@ -5,6 +5,8 @@ const state = {
   workflow: '',
   glsState: '',
   glsStateMode: 'last',
+  // Le spedizioni concluse arrivano solo quando si apre una vista che le mostra.
+  tutteCaricate: false,
   codOnly: false,
   search: '',
   dateFrom: '',
@@ -422,7 +424,7 @@ function renderStockHistory() {
 
 async function loadDashboard({quiet = false} = {}) {
   try {
-    const data = await api('/api/dashboard?include_closed=true');
+    const data = await api(state.tutteCaricate ? '/api/dashboard?include_closed=true' : '/api/dashboard');
     state.data = data;
     renderSession();
     aggiornaTendinaStati();
@@ -508,8 +510,15 @@ function renderKpis() {
   const actionable = rows.filter(daVerificare);
   const watch = rows.filter(x => !x.closed && (x.effective_severity || x.severity) === 'WATCH').length;
   const working = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status)).length;
-  const delivered = rows.filter(x => x.category === 'DELIVERED').length;
-  const returned = rows.filter(x => x.category === 'RETURN').length;
+  // Finche' le concluse non sono state scaricate, i loro contatori arrivano dal
+  // server: il numero sul tab dev'essere giusto anche se le righe non ci sono.
+  const chiuse = state.data?.chiuse || {};
+  const delivered = state.tutteCaricate
+    ? rows.filter(x => x.category === 'DELIVERED').length
+    : Number(chiuse.consegnate || 0);
+  const returned = state.tutteCaricate
+    ? rows.filter(x => x.category === 'RETURN').length
+    : Number(chiuse.rientrate || 0);
   const inConsegna = rows.filter(x => !x.closed && CATEGORIE_IN_CONSEGNA.includes(x.category)).length;
   const attive = rows.filter(x => !x.closed).length;
   const unknown = rows.filter(x => !x.closed && x.category === 'UNCLASSIFIED').length;
@@ -523,7 +532,9 @@ function renderKpis() {
   $('#tabDeliveringCount').textContent = inConsegna;
   $('#tabActiveCount').textContent = attive;
   segnalaStatiDaClassificare(unknown);
-  $('#tabAllCount').textContent = rows.length;
+  $('#tabAllCount').textContent = state.tutteCaricate
+    ? rows.length
+    : rows.length + Number(chiuse.totale || 0);
 }
 
 function filteredShipments() {
@@ -612,7 +623,8 @@ function renderTable() {
   if (rows.length === 0) renderEmptyState(empty, total);
   // Nell'archivio completo il metro di paragone e' il totale affidato a GLS,
   // non le sole spedizioni ancora in corso.
-  const complessive = (state.data?.shipments || []).length;
+  const complessive = (state.data?.shipments || []).length
+    + (state.tutteCaricate ? 0 : Number((state.data?.chiuse || {}).totale || 0));
   const riferimento = state.view === 'all'
     ? `${complessive} affidate a GLS`
     : `${total} GLS attive monitorate`;
@@ -1129,6 +1141,17 @@ function impostaMenuImpostazioni() {
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') chiudi(); });
 }
 
+// Consegnati, Rientrati e Tutte sono le uniche viste che guardano le pratiche
+// concluse: sono i quattro quinti dell'archivio, e caricarle a ogni apertura
+// della pagina costava banda e memoria per dati che nessuno stava guardando.
+const VISTE_CON_CONCLUSE = ['all', 'delivered', 'returned'];
+
+async function assicuraSpedizioniConcluse() {
+  if (state.tutteCaricate) return;
+  state.tutteCaricate = true;
+  await loadDashboard({quiet: true});
+}
+
 function switchView(view) {
   if (state.view !== view) clearQueueFilters();
   state.view = view;
@@ -1143,6 +1166,9 @@ function switchView(view) {
   $('#shipmentsPanel').classList.remove('hidden');
   $('#filters').classList.remove('hidden');
   renderTable();
+  if (VISTE_CON_CONCLUSE.includes(view)) {
+    assicuraSpedizioniConcluse().then(() => { renderKpis(); renderTable(); });
+  }
 }
 
 function setQuickDate(days) {

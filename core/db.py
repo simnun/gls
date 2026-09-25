@@ -1132,8 +1132,18 @@ class Database:
 
             unknown = sum(1 for x in shipments if x["category"] == "UNCLASSIFIED")
             pending_actions = sum(1 for x in shipments if x.get("last_operator_action") and x["workflow_status"] not in {"RESOLVED", "IGNORED"})
+            # Quante sono le concluse, senza spedirne le righe: i contatori dei
+            # tab devono essere giusti anche quando l'elenco non le contiene.
+            conteggi = {r["category"]: int(r["quante"]) for r in conn.execute(
+                "SELECT category, COUNT(*) AS quante FROM shipments WHERE closed=1 GROUP BY category"
+            ).fetchall()}
             return {
                 "shipments": shipments,
+                "chiuse": {
+                    "totale": sum(conteggi.values()),
+                    "consegnate": conteggi.get("DELIVERED", 0),
+                    "rientrate": conteggi.get("RETURN", 0),
+                },
                 "stati_gls": sorted(vocabolario, key=vocabolario.get),
                 "counts": counts,
                 "workflow_counts": workflow,
