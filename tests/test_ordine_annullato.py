@@ -167,6 +167,10 @@ class ChiusuraDurantelaSincronizzazioneTests(unittest.TestCase):
         def extract_gls_shipments(self, orders):
             return []
 
+        def ordini_per_id(self, gids):
+            # Il client vero rilegge gli ordini indicati: qui li ha gia' tutti.
+            return [o for o in self.ordini if o.get("id") in set(gids)]
+
         def tracking_correnti(self, orders):
             from core.shopify import ShopifyClient
             return ShopifyClient.tracking_correnti(orders)
@@ -221,3 +225,25 @@ class ChiusuraDurantelaSincronizzazioneTests(unittest.TestCase):
         chiuse = motore._chiudi_tracking_sostituiti(motore.shopify.list_recent_orders())
         self.assertEqual(chiuse, 0)
         self.assertFalse(db.get_shipment("NI665000001")["closed"])
+
+
+class OrdiniFuoriFinestraTests(unittest.TestCase):
+    """Il tracking puo' essere stato cambiato giorni fa: per data quell'ordine
+    non tornerebbe piu' a tiro, e la spedizione resterebbe in coda per sempre."""
+
+    def setUp(self):
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+
+    def test_elenca_gli_ordini_delle_spedizioni_ferme(self):
+        self.db.upsert_shipment({"tracking_number": "NI1", "order_gid": "gid://Order/1",
+                                 "closed": False})
+        self.db.upsert_shipment({"tracking_number": "NI2", "order_gid": "gid://Order/2",
+                                 "gls_event_at": "2026-09-20T10:00:00+02:00", "closed": False})
+        self.db.upsert_shipment({"tracking_number": "NI3", "order_gid": "gid://Order/3",
+                                 "closed": True})
+        # Solo la prima: la seconda ha viaggiato, la terza e' gia' conclusa.
+        self.assertEqual(self.db.ordini_da_ricontrollare(), ["gid://Order/1"])
+
+    def test_una_spedizione_senza_ordine_non_si_puo_ricontrollare(self):
+        self.db.upsert_shipment({"tracking_number": "NI9", "closed": False})
+        self.assertEqual(self.db.ordini_da_ricontrollare(), [])

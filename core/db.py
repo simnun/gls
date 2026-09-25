@@ -961,6 +961,20 @@ class Database:
                 corrette += 1
         return corrette
 
+    def ordini_da_ricontrollare(self) -> list[str]:
+        """Gli ordini delle spedizioni aperte che non hanno mai avuto un evento.
+
+        Sono le uniche che possono essere state sostituite senza che nessuno se
+        ne accorga: se il collo ha gia' viaggiato il tracking e' quello giusto.
+        """
+        with self.connect() as conn:
+            righe = conn.execute(
+                """SELECT DISTINCT order_gid FROM shipments
+                   WHERE closed=0 AND gls_event_at IS NULL
+                     AND COALESCE(order_gid,'')<>''"""
+            ).fetchall()
+            return [r["order_gid"] for r in righe]
+
     def spedizioni_per_ordine(self, order_gids: list[str]) -> dict[str, list[dict[str, Any]]]:
         """Le spedizioni ancora aperte degli ordini indicati, raggruppate per ordine."""
         gids = [g for g in order_gids if g]

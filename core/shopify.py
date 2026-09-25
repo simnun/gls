@@ -262,6 +262,44 @@ class ShopifyClient:
                     )
         return result
 
+    def ordini_per_id(self, gids: list[str]) -> list[dict[str, Any]]:
+        """Rilegge ordini precisi, anche fuori dalla finestra incrementale.
+
+        La ricerca per data porta solo gli ordini toccati di recente: una
+        spedizione ferma da giorni non verrebbe mai riconsiderata, anche se sul
+        suo ordine il tracking e' stato cambiato nel frattempo.
+        """
+        richiesti = [g for g in dict.fromkeys(gids) if g]
+        if not richiesti or not self.config.shopify_configured:
+            return []
+        query = r"""
+        query OrdiniPrecisi($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Order {
+              id
+              name
+              cancelledAt
+              fulfillments {
+                id
+                status
+                createdAt
+                trackingInfo(first: 10) { company number url }
+              }
+            }
+          }
+        }
+        """
+        ordini: list[dict[str, Any]] = []
+        # Shopify accetta un numero limitato di identificativi per chiamata.
+        for inizio in range(0, len(richiesti), 100):
+            blocco = richiesti[inizio:inizio + 100]
+            try:
+                dati, _ = self.graphql(query, {"ids": blocco})
+            except ShopifyError:
+                continue
+            ordini.extend(n for n in (dati.get("nodes") or []) if n and n.get("id"))
+        return ordini
+
     @staticmethod
     def tracking_correnti(orders: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         """Per ogni ordine letto: i numeri di spedizione che porta adesso.

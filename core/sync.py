@@ -676,6 +676,15 @@ class SyncEngine:
         Vale solo per i tracking mai partiti: se il collo ha gia' viaggiato la
         sua storia e' reale e va conservata.
         """
+        # Alla lettura incrementale si aggiungono gli ordini delle spedizioni
+        # ferme senza eventi: il tracking puo' essere stato cambiato giorni fa,
+        # e per data non tornerebbero piu' a tiro.
+        da_ricontrollare = self.db.ordini_da_ricontrollare()
+        letti = {str(o.get("id") or "") for o in orders}
+        mancanti = [g for g in da_ricontrollare if g not in letti]
+        if mancanti:
+            orders = [*orders, *self.shopify.ordini_per_id(mancanti)]
+
         corrente = self.shopify.tracking_correnti(orders)
         if not corrente:
             return 0
