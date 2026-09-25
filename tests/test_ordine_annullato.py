@@ -101,3 +101,123 @@ class EstrazioneShopifyTests(unittest.TestCase):
             "trackingInfo": [{"company": "BRT", "number": "BRT9", "url": ""}],
         })
         self.assertEqual(self.client.extract_gls_shipments([ordine])[0]["replaced_by_carrier"], "")
+
+
+class TrackingSostituitoTests(unittest.TestCase):
+    """Su Shopify il numero si riscrive sulla stessa spedizione: quando il collo
+    passa a un altro corriere il tracking GLS sparisce dall'ordine, e da noi
+    resterebbe in coda in attesa di eventi che non arriveranno mai."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+
+        from core.shopify import ShopifyClient
+        self.client = ShopifyClient(SimpleNamespace(
+            shopify_configured=True, shopify_shop="x", shopify_client_id="a",
+            shopify_client_secret="b", shopify_api_version="2025-01",
+            shopify_lookback_days=21, gls_accept_unlabeled_tracking=False,
+            request_timeout_seconds=5))
+        self.db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+
+    def ordine_con_poste(self):
+        # Com'e' ridotto #278700 dopo la modifica: una sola spedizione, con
+        # dentro il numero del corriere subentrato.
+        return [{
+            "id": "gid://shopify/Order/9", "name": "#278700",
+            "fulfillments": [{
+                "id": "f1", "status": "SUCCESS", "createdAt": "2026-09-23T09:21:51Z",
+                "trackingInfo": [{"company": "Poste Italiane", "number": "D76937I003660",
+                                  "url": "https://www.poste.it/"}],
+            }],
+        }]
+
+    def test_l_ordine_non_porta_piu_il_numero_gls(self):
+        corrente = self.client.tracking_correnti(self.ordine_con_poste())
+        dati = corrente["gid://shopify/Order/9"]
+        self.assertEqual(dati["numeri"], {"D76937I003660"})
+        self.assertEqual(dati["corrieri_non_gls"], ["Poste Italiane"])
+        self.assertNotIn("NI665000000", dati["numeri"])
+
+    def test_la_spedizione_gls_viene_ritrovata_dall_ordine(self):
+        self.db.upsert_shipment({"tracking_number": "NI665000000",
+                                 "order_gid": "gid://shopify/Order/9", "closed": False})
+        gruppi = self.db.spedizioni_per_ordine(["gid://shopify/Order/9"])
+        self.assertEqual([s["tracking_number"] for s in gruppi["gid://shopify/Order/9"]],
+                         ["NI665000000"])
+
+    def test_le_spedizioni_gia_concluse_non_si_ripescano(self):
+        self.db.upsert_shipment({"tracking_number": "NI1",
+                                 "order_gid": "gid://shopify/Order/9", "closed": True})
+        self.assertEqual(self.db.spedizioni_per_ordine(["gid://shopify/Order/9"]), {})
+
+    def test_un_elenco_vuoto_non_interroga_il_database(self):
+        self.assertEqual(self.db.spedizioni_per_ordine([]), {})
+
+
+class ChiusuraDurantelaSincronizzazioneTests(unittest.TestCase):
+    """La chiusura deve avvenire durante la sincronizzazione, non a mano."""
+
+    class ShopifyFinto:
+        def __init__(self, ordini):
+            self.ordini = ordini
+
+        def list_recent_orders(self, since_iso=None):
+            return self.ordini
+
+        def extract_gls_shipments(self, orders):
+            return []
+
+        def tracking_correnti(self, orders):
+            from core.shopify import ShopifyClient
+            return ShopifyClient.tracking_correnti(orders)
+
+    class GlsFinto:
+        def track(self, tracking):
+            raise AssertionError("una spedizione sostituita non va interrogata a GLS")
+
+    def configurazione(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            rules_path=Path(__file__).resolve().parents[1] / "config" / "rules.json",
+            gls_public_workers=2, gls_retry_attempts=1, mock_mode=False,
+            shopify_configured=True, gls_tracking_configured=True, sync_workers=2)
+
+    def test_la_sincronizzazione_chiude_il_tracking_sparito(self):
+        from core.sync import SyncEngine
+
+        db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        db.upsert_shipment({"tracking_number": "NI665000000", "order_name": "#278700",
+                            "order_gid": "gid://shopify/Order/9", "closed": False})
+        motore = SyncEngine(self.configurazione(), db)
+        motore.shopify = self.ShopifyFinto([{
+            "id": "gid://shopify/Order/9", "name": "#278700",
+            "fulfillments": [{"id": "f1", "status": "SUCCESS", "createdAt": "2026-09-23T09:21:51Z",
+                              "trackingInfo": [{"company": "Poste Italiane",
+                                                "number": "D76937I003660", "url": ""}]}],
+        }])
+        motore.gls = self.GlsFinto()
+        motore.run_sync()
+
+        riga = db.get_shipment("NI665000000")
+        self.assertTrue(riga["closed"])
+        self.assertEqual(riga["category"], "REPLACED_CARRIER")
+        self.assertEqual(riga["replaced_by_carrier"], "Poste Italiane")
+        self.assertIn("Poste Italiane", riga["gls_status"])
+
+    def test_un_collo_gia_partito_non_viene_chiuso(self):
+        from core.sync import SyncEngine
+
+        db = Database(path=Path(tempfile.mkdtemp()) / "t.db")
+        db.upsert_shipment({"tracking_number": "NI665000001", "order_gid": "gid://shopify/Order/9",
+                            "gls_event_at": "2026-09-22T10:00:00+02:00", "closed": False})
+        motore = SyncEngine(self.configurazione(), db)
+        motore.shopify = self.ShopifyFinto([{
+            "id": "gid://shopify/Order/9",
+            "fulfillments": [{"id": "f1", "status": "SUCCESS", "createdAt": "2026-09-23T09:21:51Z",
+                              "trackingInfo": [{"company": "Poste Italiane",
+                                                "number": "D769", "url": ""}]}],
+        }])
+        motore.gls = self.GlsFinto()
+        chiuse = motore._chiudi_tracking_sostituiti(motore.shopify.list_recent_orders())
+        self.assertEqual(chiuse, 0)
+        self.assertFalse(db.get_shipment("NI665000001")["closed"])

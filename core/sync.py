@@ -309,6 +309,7 @@ class SyncEngine:
             self._set_progress(phase="FILTERING", label=f"Preparo l'aggiornamento tra {shopify_orders} ordini Shopify…")
             fresh_shipments = self.shopify.extract_gls_shipments(orders)
             discovered_tracking = len(fresh_shipments)
+            sostituite = self._chiudi_tracking_sostituiti(orders)
             existing = self.db.tracking_state_map()
 
             # Aggiornamento incrementale:
@@ -663,6 +664,50 @@ class SyncEngine:
                 self.db.segna_novita_gls(shipment["tracking_number"], current.get("event_at"))
             else:
                 self.db.update_workflow(shipment["tracking_number"], "NEW", None, "Sistema")
+
+    def _chiudi_tracking_sostituiti(self, orders: list[dict[str, Any]]) -> int:
+        """Chiude le spedizioni il cui numero non e' piu' sull'ordine Shopify.
+
+        Su Shopify il numero di spedizione si puo' riscrivere sulla stessa
+        spedizione: quando il collo passa a un altro corriere, il tracking GLS
+        sparisce dall'ordine senza lasciare traccia e resterebbe in coda da noi
+        per sempre, in attesa di eventi che GLS non pubblichera' mai.
+
+        Vale solo per i tracking mai partiti: se il collo ha gia' viaggiato la
+        sua storia e' reale e va conservata.
+        """
+        corrente = self.shopify.tracking_correnti(orders)
+        if not corrente:
+            return 0
+        chiuse = 0
+        for gid, spedizioni in self.db.spedizioni_per_ordine(list(corrente)).items():
+            dati = corrente.get(gid) or {}
+            numeri = dati.get("numeri") or set()
+            for spedizione in spedizioni:
+                tracking = str(spedizione.get("tracking_number") or "")
+                if not tracking or tracking in numeri or spedizione.get("gls_event_at"):
+                    continue
+                corrieri = dati.get("corrieri_non_gls") or []
+                nuovo = corrieri[0] if corrieri else ""
+                stato = f"Spedizione affidata a {nuovo}" if nuovo else "Tracking GLS sostituito su Shopify"
+                nota = ("Il numero GLS non compare piu' sull'ordine Shopify: il collo e' stato "
+                        f"affidato a {nuovo}." if nuovo else
+                        "Il numero GLS non compare piu' sull'ordine Shopify: questo tracking "
+                        "non avra' seguito.")
+                self.db.upsert_shipment({
+                    "tracking_number": tracking,
+                    "gls_status": stato, "gls_note": nota,
+                    "gls_code": "", "gls_location": "", "gls_event_at": None,
+                    "severity": "NORMAL", "category": "REPLACED_CARRIER",
+                    "reason": nota,
+                    "recommended_action": "Nessuna azione: la spedizione non partira'.",
+                    "closed": True, "source": "shopify+gls",
+                    "replaced_by_carrier": nuovo,
+                    "gls_checked_at": datetime.now(timezone.utc).isoformat(),
+                })
+                self.db.update_workflow(tracking, "RESOLVED", None, "Sistema")
+                chiuse += 1
+        return chiuse
 
     def _save_no_events(self, shipment: dict[str, Any]) -> str:
         # Un tracking senza eventi resta una vera pratica Shopify: ordine, cliente e

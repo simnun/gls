@@ -263,6 +263,36 @@ class ShopifyClient:
         return result
 
     @staticmethod
+    def tracking_correnti(orders: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Per ogni ordine letto: i numeri di spedizione che porta adesso.
+
+        Un tracking GLS puo' sparire senza lasciare traccia, perche' su Shopify
+        il numero viene riscritto sulla stessa spedizione quando il collo passa
+        a un altro corriere. Confrontando quello che l'ordine porta adesso con
+        quello che abbiamo in archivio si capisce che e' stato sostituito.
+        """
+        mappa: dict[str, dict[str, Any]] = {}
+        for order in orders:
+            gid = str(order.get("id") or "")
+            if not gid:
+                continue
+            numeri: set[str] = set()
+            corrieri: list[str] = []
+            for f in order.get("fulfillments") or []:
+                if str(f.get("status") or "").upper() == "CANCELLED":
+                    continue
+                for t in f.get("trackingInfo") or []:
+                    numero = str(t.get("number") or "").strip()
+                    if not numero:
+                        continue
+                    numeri.add(numero)
+                    nome = str(t.get("company") or "").strip()
+                    if nome and not ShopifyClient._e_gls(t):
+                        corrieri.append(nome)
+            mappa[gid] = {"numeri": numeri, "corrieri_non_gls": corrieri}
+        return mappa
+
+    @staticmethod
     def _e_gls(tracking: dict[str, Any]) -> bool:
         company = str(tracking.get("company") or "").lower()
         url = str(tracking.get("url") or "").lower()

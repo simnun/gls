@@ -16,6 +16,9 @@ class FakeShopify:
         return [{"id": "order"}]
     def extract_gls_shipments(self, orders):
         return list(self.shipments)
+    def tracking_correnti(self, orders):
+        # Il vero client dice quali numeri portano adesso gli ordini letti.
+        return {}
 
 
 class FakeGLS:

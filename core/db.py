@@ -961,6 +961,26 @@ class Database:
                 corrette += 1
         return corrette
 
+    def spedizioni_per_ordine(self, order_gids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """Le spedizioni ancora aperte degli ordini indicati, raggruppate per ordine."""
+        gids = [g for g in order_gids if g]
+        if not gids:
+            return {}
+        gruppi: dict[str, list[dict[str, Any]]] = {}
+        with self.connect() as conn:
+            # A blocchi: un elenco di segnaposto troppo lungo fa rifiutare la query.
+            for inizio in range(0, len(gids), 400):
+                blocco = gids[inizio:inizio + 400]
+                segnaposto = ",".join("?" for _ in blocco)
+                righe = conn.execute(
+                    f"""SELECT tracking_number, order_gid, order_name, gls_event_at, closed
+                        FROM shipments WHERE closed=0 AND order_gid IN ({segnaposto})""",
+                    tuple(blocco),
+                ).fetchall()
+                for riga in righe:
+                    gruppi.setdefault(riga["order_gid"], []).append(dict(riga))
+        return gruppi
+
     def segna_novita_gls(self, tracking_number: str, event_at: str | None) -> None:
         """Segnala che GLS ha aggiornato una pratica gia' presa in carico.
 
