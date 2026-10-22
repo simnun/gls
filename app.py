@@ -22,6 +22,7 @@ from core import auth
 from core.sync import _parse_iso
 from core.config import get_config
 from core.wsgi import make_wsgi_app
+from core.assistente import Assistente
 from core.db import Database
 from core.timezones import ROME
 from core.sync import SyncEngine
@@ -69,6 +70,7 @@ def _apri_database() -> Database:
 
 DB = _Pigro(_apri_database)
 ENGINE = _Pigro(lambda: SyncEngine(CONFIG, DB.risolvi()))
+ASSISTENTE = _Pigro(lambda: Assistente(DB.risolvi()))
 
 
 def _senza_credenziali(testo: str) -> str:
@@ -450,6 +452,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     return self._json({"error": f"Impossibile aprire Chrome in incognito: {exc}"}, 500)
                 return self._json({"ok": True, "url": url})
+
+            if path == "/api/assistente":
+                # Risposta in linguaggio naturale calcolata dal database: il
+                # testo e' solo la cornice, i numeri arrivano da una query.
+                body = self._read_json()
+                domanda = str(body.get("domanda") or "")
+                return self._json(ASSISTENTE.rispondi(domanda))
 
             if path == "/api/maintenance/reclassify":
                 # Riapplica le regole correnti allo storico. Serve dopo un

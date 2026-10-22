@@ -23,6 +23,10 @@ const state = {
   sortDir: 'desc',
   stockSortKey: 'entered',
   stockSortDir: 'desc',
+  // Spedizioni dietro all'ultima risposta dell'assistente: la vista le mostra
+  // esattamente come sono state contate, senza riapplicare i filtri a schermo.
+  assistenteTracking: null,
+  assistenteApertoUnaVolta: false,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -538,6 +542,11 @@ function renderKpis() {
 }
 
 function filteredShipments() {
+  if (state.view === 'assistente') {
+    const voluti = new Set(state.assistenteTracking || []);
+    return sortRows((state.data?.shipments || []).filter(x => voluti.has(x.tracking_number)),
+      state.sortKey, state.sortDir, criteriSpedizione);
+  }
   let rows = applyDateFilter([...(state.data?.shipments || [])]);
   if (state.view === 'action') rows = rows.filter(x => daVerificare(x));
   if (state.view === 'working') rows = rows.filter(x => !x.closed && ['IN_PROGRESS','WAITING_CUSTOMER','WAITING_GLS'].includes(x.workflow_status));
@@ -565,18 +574,20 @@ function filteredShipments() {
       x.last_operator_action, x.last_operator_name
     ].some(v => String(v || '').toLowerCase().includes(q)));
   }
-  rows = sortRows(rows, state.sortKey, state.sortDir, (key,a,b) => {
-    const map = {
-      priority:[priorityRank(a),priorityRank(b),'number'],
-      order:[orderNumeric(a.order_name),orderNumeric(b.order_name),'number'],
-      customer:[a.customer_name,b.customer_name,'text'],
-      status:[a.gls_status || a.gls_note,b.gls_status || b.gls_note,'text'],
-      updated:[a.gls_event_at,b.gls_event_at,'date'],
-      workflow:[workflowLabels[a.workflow_status] || a.workflow_status,workflowLabels[b.workflow_status] || b.workflow_status,'text'],
-    };
-    return map[key] || map.priority;
-  });
+  rows = sortRows(rows, state.sortKey, state.sortDir, criteriSpedizione);
   return rows;
+}
+
+function criteriSpedizione(key, a, b) {
+  const map = {
+    priority:[priorityRank(a),priorityRank(b),'number'],
+    order:[orderNumeric(a.order_name),orderNumeric(b.order_name),'number'],
+    customer:[a.customer_name,b.customer_name,'text'],
+    status:[a.gls_status || a.gls_note,b.gls_status || b.gls_note,'text'],
+    updated:[a.gls_event_at,b.gls_event_at,'date'],
+    workflow:[workflowLabels[a.workflow_status] || a.workflow_status,workflowLabels[b.workflow_status] || b.workflow_status,'text'],
+  };
+  return map[key] || map.priority;
 }
 
 function renderTable() {
@@ -588,7 +599,8 @@ function renderTable() {
     action: 'Spedizioni da verificare', working: 'Pratiche in lavorazione',
     active: 'Tutte le spedizioni GLS ancora in corso', all: 'Tutte le spedizioni affidate a GLS',
     delivered: 'Consegnati al cliente · chiusi', returned: 'Rientrati al mittente · chiusi',
-    delivering: 'In viaggio verso il cliente', unknown: 'Nuovi stati GLS'
+    delivering: 'In viaggio verso il cliente', unknown: 'Nuovi stati GLS',
+    assistente: 'Le spedizioni dietro alla risposta dell\u2019assistente'
   };
   $('#tableTitle').textContent = titles[state.view] || 'Spedizioni GLS';
   const total = (state.data?.shipments || []).filter(x => !x.closed).length;
@@ -1144,7 +1156,7 @@ function impostaMenuImpostazioni() {
 // Consegnati, Rientrati e Tutte sono le uniche viste che guardano le pratiche
 // concluse: sono i quattro quinti dell'archivio, e caricarle a ogni apertura
 // della pagina costava banda e memoria per dati che nessuno stava guardando.
-const VISTE_CON_CONCLUSE = ['all', 'delivered', 'returned'];
+const VISTE_CON_CONCLUSE = ['all', 'delivered', 'returned', 'assistente'];
 
 async function assicuraSpedizioniConcluse() {
   if (state.tutteCaricate) return;
@@ -1208,6 +1220,7 @@ function bind() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
   $$('.tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
   impostaMenuImpostazioni();
+  impostaAssistente();
   $$('.metric-card').forEach(k => k.addEventListener('click', () => {
     if (k.dataset.viewTarget) switchView(k.dataset.viewTarget);
     else switchView(k.dataset.category ? 'unknown' : 'active');
@@ -1265,3 +1278,125 @@ loadStockHistory({quiet:true});
 // aggiornarsi da sola invece di restare ferma sul primo valore letto.
 pollSyncProgress().then(inCorso => { if (inCorso) startSyncPolling(); });
 setInterval(() => { loadDashboard({quiet:true}); loadStockHistory({quiet:true}); }, 30000);
+
+// ---------------------------------------------------------------------------
+// Assistente
+// ---------------------------------------------------------------------------
+// Il pannello non calcola niente: manda la domanda al server e mostra la
+// risposta insieme a come e' stata letta. Il numero e le righe arrivano dalla
+// stessa fonte, cosi' "mostrami quali" apre esattamente cio' che e' stato
+// contato e l'operatore puo' verificare con i suoi occhi.
+
+function impostaAssistente() {
+  const bottone = $('#assistantBtn');
+  const pannello = $('#assistantPanel');
+  if (!bottone || !pannello) return;
+  const log = $('#assistantLog');
+  const form = $('#assistantForm');
+  const input = $('#assistantInput');
+
+  function apri() {
+    pannello.classList.remove('hidden');
+    bottone.setAttribute('aria-expanded', 'true');
+    input.focus();
+    if (!state.assistenteApertoUnaVolta) {
+      state.assistenteApertoUnaVolta = true;
+      bollaAssistente('Chiedimi quello che vuoi sulle spedizioni: conto io sui dati del monitor.');
+      caricaSuggerimenti();
+    }
+  }
+  function chiudi() {
+    pannello.classList.add('hidden');
+    bottone.setAttribute('aria-expanded', 'false');
+  }
+
+  bottone.addEventListener('click', () => {
+    pannello.classList.contains('hidden') ? apri() : chiudi();
+  });
+  $('#assistantClose').addEventListener('click', chiudi);
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !pannello.classList.contains('hidden')) chiudi();
+  });
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const domanda = input.value.trim();
+    if (!domanda) return;
+    input.value = '';
+    await chiediAssistente(domanda);
+  });
+
+  async function caricaSuggerimenti() {
+    try {
+      const esito = await api('/api/assistente', {method: 'POST', body: JSON.stringify({domanda: ''})});
+      mostraSuggerimenti(esito.suggerimenti || []);
+    } catch (err) { /* i suggerimenti sono un di piu': se mancano, pazienza */ }
+  }
+
+  function mostraSuggerimenti(voci) {
+    const zona = $('#assistantChips');
+    zona.innerHTML = voci.map(v => `<button type="button">${esc(v)}</button>`).join('');
+    [...zona.querySelectorAll('button')].forEach(b => b.addEventListener('click', () => {
+      chiediAssistente(b.textContent);
+    }));
+  }
+
+  async function chiediAssistente(domanda) {
+    bollaAssistente(domanda, 'mia');
+    const attesa = bollaAssistente('Sto contando…');
+    try {
+      const esito = await api('/api/assistente', {
+        method: 'POST', body: JSON.stringify({domanda}),
+      });
+      attesa.remove();
+      mostraRisposta(esito);
+    } catch (err) {
+      attesa.remove();
+      bollaAssistente(`Non sono riuscito a rispondere: ${err.message}`, 'sua errore');
+    }
+  }
+
+  function bollaAssistente(testo, classe = 'sua') {
+    const bolla = document.createElement('div');
+    bolla.className = `assistant-msg ${classe}`;
+    bolla.textContent = testo;
+    log.appendChild(bolla);
+    log.scrollTop = log.scrollHeight;
+    return bolla;
+  }
+
+  function mostraRisposta(esito) {
+    const bolla = document.createElement('div');
+    bolla.className = 'assistant-msg sua';
+    const pezzi = [`<div>${esc(esito.risposta || '')}</div>`];
+    const chips = (esito.interpretazione || {}).chips || [];
+    if (chips.length) {
+      pezzi.push(`<div class="assistant-read" title="Come ho letto la domanda">`
+        + chips.map(c => `<span>${esc(c.testo)}</span>`).join('') + `</div>`);
+    }
+    if (esito.avviso) pezzi.push(`<div class="assistant-warn">${esc(esito.avviso)}</div>`);
+    if (esito.tabella && (esito.tabella.righe || []).length) {
+      const t = esito.tabella;
+      pezzi.push(`<table class="assistant-table"><thead><tr>`
+        + (t.colonne || []).map(c => `<th>${esc(c)}</th>`).join('')
+        + `</tr></thead><tbody>`
+        + t.righe.map(r => `<tr>` + r.map(v => `<td>${esc(v)}</td>`).join('') + `</tr>`).join('')
+        + `</tbody></table>`);
+    }
+    const righe = esito.righe || [];
+    if (righe.length) {
+      pezzi.push(`<button class="assistant-show" type="button">Mostrami quali (${righe.length}${esito.totale_righe > righe.length ? ' di ' + esito.totale_righe : ''}) →</button>`);
+    }
+    bolla.innerHTML = pezzi.join('');
+    const mostra = bolla.querySelector('.assistant-show');
+    if (mostra) mostra.addEventListener('click', () => apriElenco(righe));
+    log.appendChild(bolla);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function apriElenco(righe) {
+    state.assistenteTracking = righe.map(r => r.tracking_number).filter(Boolean);
+    chiudi();
+    switchView('assistente');
+    showToast(`${state.assistenteTracking.length} spedizioni mostrate in elenco`);
+  }
+}

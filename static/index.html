@@ -110,6 +110,21 @@
 
   <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="drawer" class="drawer" aria-hidden="true"><div class="drawer-header"><div><div id="drawerOrder" class="eyebrow"></div><h2 id="drawerTitle">Dettaglio spedizione</h2></div><button id="drawerClose" class="icon-btn" aria-label="Chiudi">×</button></div><div id="drawerContent" class="drawer-content"></div></aside>
+  <button id="assistantBtn" class="assistant-fab" type="button" aria-haspopup="dialog" aria-expanded="false" title="Chiedi all'assistente">
+    <span aria-hidden="true">&#128172;</span><b>Chiedi</b>
+  </button>
+  <section id="assistantPanel" class="assistant-panel hidden" role="dialog" aria-label="Assistente del monitor">
+    <header class="assistant-head">
+      <div><strong>Assistente</strong><span>risponde leggendo i dati di questo monitor</span></div>
+      <button id="assistantClose" class="icon-btn" aria-label="Chiudi">&times;</button>
+    </header>
+    <div id="assistantLog" class="assistant-log" aria-live="polite"></div>
+    <div id="assistantChips" class="assistant-suggestions"></div>
+    <form id="assistantForm" class="assistant-form" autocomplete="off">
+      <input id="assistantInput" type="text" maxlength="300" placeholder="Quante sono in giacenza adesso?">
+      <button class="btn primary" type="submit">Chiedi</button>
+    </form>
+  </section>
   <div id="toast" class="toast hidden"></div>
   <script src="/app.js" defer></script>
 </body>
