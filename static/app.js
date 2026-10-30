@@ -1341,6 +1341,9 @@ function impostaAssistente() {
   }
 
   async function chiediAssistente(domanda) {
+    // Dopo la prima domanda i suggerimenti hanno gia' fatto il loro lavoro:
+    // lo spazio serve alle risposte.
+    $('#assistantChips').classList.add('hidden');
     bollaAssistente(domanda, 'mia');
     const attesa = bollaAssistente('Sto contando…');
     try {

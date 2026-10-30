@@ -154,4 +154,7 @@ button{cursor:pointer}
 .assistant-form{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--line);background:#fff}
 .assistant-form input{flex:1;border:1px solid #d0d5dd;border-radius:10px;padding:10px 12px;outline:0}
 .assistant-form input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(20,105,201,.12)}
-@media (max-width:620px){.assistant-panel{right:8px;left:8px;width:auto;bottom:80px}.assistant-fab{right:12px;bottom:12px}}
+/* Il pulsante dell'assistente occupa l'angolo dove compariva il messaggio di
+   conferma: il messaggio sale sopra, e resta sopra anche al pannello aperto. */
+.toast{bottom:88px;z-index:62}
+@media (max-width:620px){.assistant-panel{right:8px;left:8px;width:auto;bottom:80px}.assistant-fab{right:12px;bottom:12px}.toast{bottom:76px;left:8px;right:8px;max-width:none}}
