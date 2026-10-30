@@ -6,6 +6,7 @@ import gzip
 import hmac
 import json
 import mimetypes
+import os
 import re
 import signal
 import subprocess
@@ -76,6 +77,21 @@ ASSISTENTE = _Pigro(lambda: Assistente(DB.risolvi()))
 def _senza_credenziali(testo: str) -> str:
     """Toglie le credenziali dagli URL prima di mostrare un messaggio d'errore."""
     return re.sub(r"(://)[^/\s:@]+:[^/\s@]+@", r"\1***:***@", str(testo))
+
+
+def _versione_online() -> str:
+    """Il commit che sta girando, cosi’ com’e’ stato rilasciato.
+
+    La data del file non basta a dire quale versione e’ online: la
+    piattaforma puo’ riusare il disco fra un rilascio e l’altro e la data
+    resta indietro. Render pubblica il commit in RENDER_GIT_COMMIT: e’ il
+    solo dato che dice con certezza che cosa e’ stato messo in linea.
+    """
+    for nome in ("RENDER_GIT_COMMIT", "SOURCE_VERSION", "VERCEL_GIT_COMMIT_SHA", "GIT_COMMIT"):
+        valore = (os.environ.get(nome) or "").strip()
+        if valore:
+            return valore[:12]
+    return ""
 
 
 def _momento_build() -> str:
@@ -665,6 +681,7 @@ class AppHandler(BaseHTTPRequestHandler):
         stato: dict = {
             "ok": True,
             "build": _momento_build(),
+            "versione": _versione_online(),
             "python": sys.version.split()[0],
             "tzdata": tzdata_available(),
             "serverless": CONFIG.serverless,

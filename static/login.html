@@ -105,9 +105,12 @@
     // Quando e' stata messa online questa versione: serve a capire a colpo
     // d'occhio se si sta guardando l'ultima, senza chiedere a nessuno.
     fetch('/api/status').then(r => r.json()).then(d => {
-      if (!d.build) return;
       const nota = document.getElementById('buildInfo');
-      if (nota) nota.textContent = 'Aggiornato al ' + d.build;
+      if (!nota || (!d.build && !d.versione)) return;
+      // Il commit e' l'unico dato che identifica con certezza la versione in
+      // linea: la data del file puo' restare indietro fra un rilascio e l'altro.
+      nota.textContent = [d.build ? 'Aggiornato al ' + d.build : '', d.versione]
+        .filter(Boolean).join(' \u00b7 ');
     }).catch(() => {});
   </script>
   <p id="buildInfo" class="build-info"></p>
