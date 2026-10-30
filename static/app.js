@@ -1371,9 +1371,15 @@ function impostaAssistente() {
     const bolla = document.createElement('div');
     bolla.className = 'assistant-msg sua';
     const pezzi = [`<div>${esc(esito.risposta || '')}</div>`];
-    const chips = (esito.interpretazione || {}).chips || [];
-    if (chips.length) {
-      pezzi.push(`<div class="assistant-read" title="Come ho letto la domanda">`
+    const lettura = esito.interpretazione || {};
+    const chips = lettura.chips || [];
+    // Si vede sempre chi ha letto la domanda: le regole del sito, gratis, o
+    // Claude, che costa. Il numero in ogni caso esce dal database.
+    const fonte = lettura.fonte === 'claude'
+      ? `<span class="fonte-ai" title="Domanda interpretata da Claude: il conteggio resta del database">Claude</span>`
+      : '';
+    if (chips.length || fonte) {
+      pezzi.push(`<div class="assistant-read" title="Come ho letto la domanda">` + fonte
         + chips.map(c => `<span>${esc(c.testo)}</span>`).join('') + `</div>`);
     }
     if (esito.avviso) pezzi.push(`<div class="assistant-warn">${esc(esito.avviso)}</div>`);

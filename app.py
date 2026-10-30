@@ -24,6 +24,7 @@ from core.sync import _parse_iso
 from core.config import get_config
 from core.wsgi import make_wsgi_app
 from core.assistente import Assistente
+from core.assistente_ai import LettoreAI
 from core.db import Database
 from core.timezones import ROME
 from core.sync import SyncEngine
@@ -71,7 +72,10 @@ def _apri_database() -> Database:
 
 DB = _Pigro(_apri_database)
 ENGINE = _Pigro(lambda: SyncEngine(CONFIG, DB.risolvi()))
-ASSISTENTE = _Pigro(lambda: Assistente(DB.risolvi()))
+# Il lettore AI e' facoltativo: senza ANTHROPIC_API_KEY l'assistente
+# continua a funzionare con le sole regole, a costo zero.
+LETTORE_AI = _Pigro(LettoreAI)
+ASSISTENTE = _Pigro(lambda: Assistente(DB.risolvi(), lettore_ai=LETTORE_AI.risolvi()))
 
 
 def _senza_credenziali(testo: str) -> str:
@@ -686,6 +690,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "tzdata": tzdata_available(),
             "serverless": CONFIG.serverless,
             "storage": "postgres" if CONFIG.uses_postgres else "sqlite",
+            "assistente": LETTORE_AI.stato(),
             "configurato": {
                 "database_url": bool(CONFIG.database_url),
                 "operatori": len(CONFIG.dashboard_users),

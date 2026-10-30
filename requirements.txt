@@ -5,3 +5,8 @@ psycopg[binary]==3.3.5
 # Il database dei fusi orari non e' incluso nelle immagini serverless:
 # senza, ZoneInfo("Europe/Rome") fallisce durante l'import.
 tzdata==2026.1
+
+# Facoltativo: serve solo all'assistente quando deve far leggere una domanda
+# articolata a Claude. Senza chiave API non viene nemmeno importato, cosi' su
+# un servizio da 512 MB non pesa finche' non lo si usa davvero.
+anthropic==2.3.0

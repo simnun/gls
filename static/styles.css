@@ -141,6 +141,7 @@ button{cursor:pointer}
 .assistant-msg.errore{background:var(--critical-bg);border-color:#fecdca;color:var(--critical)}
 .assistant-read{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
 .assistant-read span{background:#f2f4f7;border:1px solid #eaecf0;color:#475467;border-radius:999px;padding:3px 8px;font-size:10.5px;font-weight:700}
+.assistant-read .fonte-ai{background:var(--purple-bg);border-color:#d9d6fe;color:var(--purple)}
 .assistant-warn{margin-top:8px;background:var(--watch-bg);border:1px solid #fedf89;color:#7a2e0e;border-radius:10px;padding:7px 9px;font-size:11.5px}
 .assistant-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
 .assistant-table th{text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:4px 6px;border-bottom:1px solid var(--line)}

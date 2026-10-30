@@ -832,9 +832,13 @@ COLONNE_RIGA = (
 class Assistente:
     """Risponde a domande scritte, leggendo solo il database del monitor."""
 
-    def __init__(self, db: Any, durata_cache: int = 300):
+    def __init__(self, db: Any, durata_cache: int = 300, lettore_ai: Any = None):
         self.db = db
         self.durata_cache = durata_cache
+        # Lettore opzionale: quando la frase e' troppo articolata per le regole
+        # qui sotto, la domanda viene passata a Claude, che pero' riempie
+        # questa stessa scheda di filtri. Le query non cambiano.
+        self.lettore_ai = lettore_ai
         self._vocabolario: Vocabolario | None = None
         self._vocabolario_at: float = 0.0
 
@@ -874,7 +878,23 @@ class Assistente:
         if len(domanda) > 400:
             domanda = domanda[:400]
         oggi = oggi or datetime.now(ROME).date()
-        lettura = interpreta(domanda, self.vocabolario(), oggi)
+        vocabolario = self.vocabolario()
+        lettura = interpreta(domanda, vocabolario, oggi)
+        fonte = "regole"
+        avviso_ai = ""
+        if self.lettore_ai is not None and lettura_incerta(lettura):
+            letta, avviso_ai = self.lettore_ai.interpreta(domanda, vocabolario, oggi)
+            if letta is not None:
+                lettura, fonte = letta, "claude"
+            elif avviso_ai:
+                # Claude ha detto che con questi dati non si risponde: e' una
+                # risposta utile, molto piu' di un numero preso a caso.
+                return {
+                    "ok": True, "domanda": domanda, "risposta": avviso_ai,
+                    "numero": None, "righe": [], "totale_righe": 0,
+                    "interpretazione": {"chips": [], "non_capito": [], "fonte": "claude"},
+                    "suggerimenti": list(SUGGERIMENTI),
+                }
         if lettura.intento == "dettaglio":
             esito = self._dettaglio(lettura)
         elif lettura.percorso:
@@ -888,10 +908,11 @@ class Assistente:
             "domanda": domanda,
             "interpretazione": {
                 "chips": lettura.chips(),
-                "non_capito": lettura.non_capito,
+                "non_capito": lettura.non_capito if fonte == "regole" else [],
+                "fonte": fonte,
             },
         })
-        if lettura.non_capito:
+        if lettura.non_capito and fonte == "regole":
             esito["avviso"] = ("Non ho considerato queste parole: "
                                + ", ".join(lettura.non_capito)
                                + ". Se cambiano la domanda, riscrivila in altro modo.")
@@ -1309,6 +1330,29 @@ def _frase(lettura: Lettura, numero: int, extra: dict[str, Any]) -> str:
     if quando:
         return f"{quando.capitalize()} risultano {numero} {nome} {coda}".strip() + "."
     return f"Ci sono {numero} {nome} {coda}".strip() + "."
+
+
+def lettura_incerta(lettura: Lettura) -> bool:
+    """Dice se la lettura a regole e' troppo debole per fidarsene.
+
+    Due casi: sono rimaste fuori parole che potrebbero cambiare il senso della
+    domanda, oppure dalla frase non e' stato estratto nessun filtro e si
+    risponderebbe con un totale generico che nessuno ha chiesto. Fuori da
+    questi due casi le regole bastano, e una domanda che costa zero e'
+    preferibile a una che costa.
+    """
+    if lettura.non_capito:
+        return True
+    if lettura.intento == "dettaglio":
+        return False
+    significativo = any((
+        lettura.categorie, lettura.gruppo, lettura.gravita, lettura.operatore,
+        lettura.provincia, lettura.citta, lettura.stato_gls, lettura.testo_libero,
+        lettura.solo_cod, lettura.gestite, lettura.raggruppa, lettura.percorso,
+        lettura.periodo is not None, lettura.adesso,
+        lettura.soggetto != "SPEDIZIONI",
+    ))
+    return not significativo
 
 
 SUGGERIMENTI = (
