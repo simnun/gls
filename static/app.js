@@ -541,6 +541,11 @@ const MESI_NOMI = ['gennaio','febbraio','marzo','aprile','maggio','giugno',
 
 // Un numero da solo non dice se e' tanto o poco: accanto va messo lo stesso
 // tratto del mese prima, confrontando periodi della stessa lunghezza.
+function renderAnalisi() {
+  renderMese();
+  renderAndamento();
+}
+
 function renderMese() {
   const zona = $('#mesePanel');
   if (!zona) return;
@@ -699,8 +704,7 @@ function renderKpis() {
   $('#tabDeliveringCount').textContent = inConsegna;
   $('#tabActiveCount').textContent = attive;
   segnalaStatiDaClassificare(unknown);
-  renderMese();
-  renderAndamento();
+  if (state.view === 'analisi') renderAnalisi();
   $('#tabAllCount').textContent = state.tutteCaricate
     ? rows.length
     : rows.length + Number(chiuse.totale || 0);
@@ -1335,9 +1339,11 @@ function switchView(view) {
   $$('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
   $$('.settings-item').forEach(v => v.classList.toggle('active', v.dataset.view === view));
   $('#rulesPanel').classList.add('hidden');
+  $('#analisiPanel').classList.add('hidden');
   $('#stockPanel').classList.add('hidden');
   $('#shipmentsPanel').classList.add('hidden');
   $('#filters').classList.add('hidden');
+  if (view === 'analisi') { $('#analisiPanel').classList.remove('hidden'); renderAnalisi(); return; }
   if (view === 'rules') return renderRules();
   if (view === 'stocks') { $('#stockPanel').classList.remove('hidden'); loadStockHistory({quiet:true}); return; }
   $('#shipmentsPanel').classList.remove('hidden');
@@ -1384,6 +1390,11 @@ function bind() {
   $('#drawerBackdrop').addEventListener('click', closeDrawer);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
   $$('.tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+  const analisi = $('#analisiBtn');
+  if (analisi) analisi.addEventListener('click', () => {
+    switchView(state.view === 'analisi' ? 'action' : 'analisi');
+    analisi.classList.toggle('attivo', state.view === 'analisi');
+  });
   impostaMenuImpostazioni();
   impostaAssistente();
   $$('.metric-card').forEach(k => k.addEventListener('click', () => {

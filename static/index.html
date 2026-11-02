@@ -42,15 +42,7 @@
       <button class="metric-card progress" data-view-target="working"><span class="metric-icon"><svg class="icona" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="metric-copy"><small>In lavorazione</small><strong id="kpiWorking">0</strong><em>pratiche già prese in carico</em></span></button>
     </section>
 
-      <section id="mesePanel" class="mese-grid" aria-label="Il mese a confronto"></section>
 
-      <section id="andamentoPanel" class="grafico-card" aria-label="Andamento degli ultimi 30 giorni">
-        <div class="grafico-testa">
-          <h2>Ultimi 30 giorni</h2>
-          <div id="grafLegenda" class="grafico-legenda"></div>
-        </div>
-        <div id="grafico" class="grafico-tela"></div>
-      </section>
 
     <section class="workspace-card">
       <div class="workspace-top">
@@ -65,6 +57,7 @@
           <button class="tab" data-view="stocks"><span>Storico giacenze</span><b id="tabStockCount">0</b></button>
         </nav>
         <div class="workspace-tools">
+          <button id="analisiBtn" class="settings-btn" type="button" data-view="analisi" title="Analisi" aria-label="Analisi"><svg class="icona" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.6A9 9 0 0 1 20.4 9H15z"/></svg></button>
           <div class="settings-menu">
             <button id="settingsBtn" class="settings-btn" type="button" aria-haspopup="true" aria-expanded="false" title="Impostazioni"><svg class="icona" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg></button>
             <div id="settingsPanel" class="settings-panel hidden" role="menu">
@@ -114,6 +107,17 @@
         <div class="table-wrap"><table class="data-table stock-table"><thead><tr><th><button class="sort-head stock-sort" data-sort="outcome">Esito <span></span></button></th><th><button class="sort-head stock-sort" data-sort="order">Ordine <span></span></button></th><th><button class="sort-head stock-sort" data-sort="customer">Cliente <span></span></button></th><th><button class="sort-head stock-sort" data-sort="entered">Entrata in giacenza <span></span></button></th><th><button class="sort-head stock-sort" data-sort="activity">Istruzione / attività <span></span></button></th><th><button class="sort-head stock-sort" data-sort="current">Stato attuale <span></span></button></th><th>Gestisci</th></tr></thead><tbody id="stockBody"></tbody></table><div id="stockEmpty" class="empty-state hidden"><div class="empty-icon"><svg class="icona" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><h3>Nessuna giacenza trovata</h3><p>Lo storico si popola automaticamente dagli eventi GLS memorizzati.</p></div></div>
       </section>
 
+      <section id="analisiPanel" class="analisi-panel hidden">
+        <div class="section-heading"><div><h2>Analisi</h2><p>Il mese a confronto e l’andamento degli ultimi trenta giorni.</p></div></div>
+      <section id="mesePanel" class="mese-grid" aria-label="Il mese a confronto"></section>
+      <section id="andamentoPanel" class="grafico-card" aria-label="Andamento degli ultimi 30 giorni">
+        <div class="grafico-testa">
+          <h2>Ultimi 30 giorni</h2>
+          <div id="grafLegenda" class="grafico-legenda"></div>
+        </div>
+        <div id="grafico" class="grafico-tela"></div>
+      </section>
+      </section>
       <section id="rulesPanel" class="rules-panel hidden"><div class="section-heading"><div><h2>Regole di classificazione</h2><p>I codici classificati manualmente hanno precedenza sulle regole testuali.</p></div></div><div id="rulesContent" class="rules-grid"></div></section>
     </section>
   </main>

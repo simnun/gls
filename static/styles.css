@@ -11,11 +11,14 @@
   --navy:#1b1f24; --navy-2:#1b1f24;
   --accent:#2f6feb; --accent-2:#2a62d0; --accent-soft:#eef3fd;
 
-  --critical:#15181d; --critical-bg:var(--line-2);
-  --warning:#434950; --warning-bg:#f4f5f7;
-  --watch:#767d87; --watch-bg:#f7f8f9;
-  --info:#434950; --info-bg:#f4f5f7;
-  --normal:#767d87; --normal-bg:#f7f8f9;
+  /* Unica eccezione alla palette neutra: la gravita'. Serve a dire che cosa
+     viene prima, e un grigio non lo dice. Vive solo sulla pastiglia della
+     priorita' e sulla barra della riga, mai per decorare altro. */
+  --critical:#b42318; --critical-bg:#fef3f2;
+  --warning:#b54708; --warning-bg:#fff6ed;
+  --watch:#854a0e; --watch-bg:#fffaeb;
+  --info:#175cd3; --info-bg:#eff8ff;
+  --normal:#067647; --normal-bg:#ecfdf3;
   --purple:#434950; --purple-bg:#f4f5f7;
 
   /* Ombre neutre e appena percettibili: nessun alone colorato. */
@@ -295,3 +298,26 @@ button{cursor:pointer}
 .graf-punto{stroke:var(--surface);stroke-width:2}
 .graf-tooltip{position:absolute;pointer-events:none;background:var(--ink);color:#fff;border-radius:8px;padding:8px;font-size:11px;line-height:1.5;white-space:nowrap;opacity:0;transition:opacity .12s ease}
 .grafico-tela{position:relative}
+
+/* Le analisi stanno dietro a un pulsante: la coda di lavoro non deve
+   condividere lo schermo con dei grafici. */
+.analisi-panel{padding:0 0 8px}
+.analisi-panel .section-heading{padding:16px 16px 0}
+.analisi-panel .mese-grid,.analisi-panel .grafico-card{margin:16px}
+#analisiBtn.attivo{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+
+/* I colori della priorita' tornano: in una coda di lavoro il rosso dice
+   "questa prima delle altre", e nessun altro segnale lo sostituisce con la
+   stessa immediatezza. Restano gli unici colori del sistema oltre
+   all'accento, e vivono solo qui: pastiglia e barra di riga. */
+.priority-pill{display:inline-flex;align-items:center;border-radius:99px;padding:8px;font-size:11px;font-weight:600}
+.priority-pill.CRITICAL{color:var(--critical);background:var(--critical-bg)}
+.priority-pill.WARNING{color:var(--warning);background:var(--warning-bg)}
+.priority-pill.WATCH{color:var(--watch);background:var(--watch-bg)}
+.priority-pill.INFO{color:var(--info);background:var(--info-bg)}
+.priority-pill.NORMAL{color:var(--normal);background:var(--normal-bg)}
+.shipment-row.CRITICAL:before{background:var(--critical)}
+.shipment-row.WARNING:before{background:var(--warning)}
+.shipment-row.WATCH:before{background:var(--watch)}
+.shipment-row.INFO:before{background:var(--info)}
+.shipment-row.NORMAL:before{background:transparent}
