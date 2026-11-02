@@ -142,6 +142,12 @@ def technical_error_info(message: str) -> dict[str, Any]:
 
 # Quanto uno stato "chiude il discorso". Serve solo a mettere in fila due
 # scansioni dello stesso minuto: nella realta' l'annuncio precede l'esito.
+# Esiti che chiudono la storia di una spedizione. Dopo uno di questi il collo
+# continua a essere scansionato - il reso viaggia all'indietro e GLS lo registra
+# a ogni passaggio - ma la pratica e' finita, e quelle scansioni non la
+# riaprono.
+CATEGORIE_TERMINALI = {"DELIVERED", "RETURN"}
+
 PESI_CONCLUSIVI = {
     "DELIVERED": 3, "RETURN": 3,
     "STORAGE": 2, "REFUSED": 2, "ADDRESS_ERROR": 2, "ABSENT": 2,
@@ -514,7 +520,12 @@ class SyncEngine:
             # a parita' di minuto vale la sostanza: un esito viene dopo l'annuncio
             # che lo precede.
             corrente = ultimo_per_tracking.get(e["tracking_number"])
-            chiave = (str(e.get("event_at") or ""), peso_conclusivo(classificazione.category), int(e["id"]))
+            chiave = (
+                1 if classificazione.category in CATEGORIE_TERMINALI else 0,
+                str(e.get("event_at") or ""),
+                peso_conclusivo(classificazione.category),
+                int(e["id"]),
+            )
             if corrente is None or chiave >= corrente["chiave"]:
                 ultimo_per_tracking[e["tracking_number"]] = {
                     "evento": e, "classe": classificazione, "chiave": chiave,
@@ -572,10 +583,33 @@ class SyncEngine:
         except Exception:
             return None
 
+    def _evento_conclusivo(self, eventi: list[dict[str, Any]], is_cod: bool) -> dict[str, Any] | None:
+        """L'ultimo evento che dichiara un esito, se c'e' stato.
+
+        Gli eventi sono in ordine di tempo, quindi l'ultimo esito trovato e' il
+        piu' recente: se GLS ha prima reso al mittente e poi riconsegnato,
+        vince la consegna.
+        """
+        conclusivo = None
+        for evento in eventi:
+            classe = self.classifier.classify(
+                code=evento.get("code"), state=evento.get("state"),
+                note=evento.get("note"), event_at=evento.get("event_at"), is_cod=is_cod,
+            )
+            if classe.category in CATEGORIE_TERMINALI:
+                conclusivo = evento
+        return conclusivo
+
     def _save_tracking(self, shipment: dict[str, Any], tracked: dict[str, Any]) -> None:
         # gls_checked_at viene impostato da upsert_shipment: e' il campo che
         # determina il turno nella coda delle prossime esecuzioni.
-        current = tracked.get("current_event") or {}
+        # Di norma la spedizione e' descritta dal suo ultimo evento. Ma quando
+        # GLS ha gia' dichiarato un esito, le scansioni successive raccontano il
+        # ritorno del collo verso il mittente: prenderle per buone farebbe
+        # riaprire una pratica chiusa, mostrandola "disponibile per il ritiro"
+        # giorni dopo che era stata resa.
+        current = (self._evento_conclusivo(tracked.get("events") or [], bool(shipment.get("is_cod")))
+                   or tracked.get("current_event") or {})
         # La nota di testata di GLS resta ferma alla scansione precedente: se la
         # prendessimo quando l'ultimo evento non ne ha una, la spedizione
         # risulterebbe ancora in giacenza per via di un "in attesa di istruzioni"
