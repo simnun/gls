@@ -632,11 +632,22 @@ function renderAndamento() {
   const indici = Array.from({length: quante}, (_, k) => Math.round(k * (giorni.length - 1) / (quante - 1)));
   const asseX = indici.map(i => `<text class="graf-asse" x="${x(i)}" y="${H - 8}" text-anchor="middle">${giorno(giorni[i])}</text>`).join('');
 
+  // Le etichette in fondo alle linee vanno dove finisce la linea, ma due
+  // serie che chiudono sullo stesso valore si stamperebbero una sopra
+  // l'altra: in quel caso si allontanano quel tanto che basta a leggerle.
+  const etichette = serie.map((s, n) => ({n, y: y(s.valori[s.valori.length - 1])}))
+    .sort((a, b) => a.y - b.y);
+  etichette.forEach((e, k) => {
+    if (k && e.y - etichette[k - 1].y < 14) e.y = etichette[k - 1].y + 14;
+  });
+  const scostamento = Math.max(0, etichette[etichette.length - 1].y - (H - B));
+  const altezzaEtichetta = {};
+  etichette.forEach(e => { altezzaEtichetta[e.n] = e.y - scostamento; });
+
   const linee = serie.map((s, n) => {
     const d = s.valori.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
-    const ultimo = s.valori[s.valori.length - 1];
     return `<path class="graf-linea" d="${d}" stroke="${GRAF_COLORI[n]}"/>`
-      + `<text class="graf-etichetta" x="${W - R + 8}" y="${y(ultimo) + 4}" fill="${GRAF_COLORI[n]}">${esc(s.nome)}</text>`;
+      + `<text class="graf-etichetta" x="${W - R + 8}" y="${(altezzaEtichetta[n] + 4).toFixed(1)}" fill="${GRAF_COLORI[n]}">${esc(s.nome)}</text>`;
   }).join('');
 
   tela.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Andamento degli ultimi ${giorni.length} giorni">
