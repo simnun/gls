@@ -31,8 +31,15 @@ from .assistente import ETICHETTE_CATEGORIA, ETICHETTE_GRUPPO, Lettura, Periodo,
 from .timezones import ROME
 
 MODELLO_PREDEFINITO = "claude-opus-5-5"
-MAX_TOKEN_USCITA = 1024
-MAX_GIRI = 3
+# Spazio di uscita largo. Il ragionamento del modello si paga sull'uscita e
+# conta nello stesso tetto: con 1024 token una domanda in due parti ("quante
+# dal 1 settembre, e quante di queste consegnate") finiva il budget pensando e
+# veniva troncata prima di scrivere la risposta. Il tetto non e' una spesa: si
+# paga quello che si usa davvero, e serve solo a fermare una risposta anomala.
+MAX_TOKEN_USCITA = 8000
+# Una domanda puo' richiedere piu' interrogazioni: "quante ne sono partite e
+# quante di quelle sono arrivate" sono due conteggi diversi.
+MAX_GIRI = 5
 # Quante spedizioni di esempio accompagnano un conteggio: servono a far dire a
 # Claude "per esempio l'ordine #278004", non a fargli rifare i conti.
 MAX_ESEMPI = 6
@@ -237,9 +244,16 @@ class Collaboratore:
                 self.consumo.errori += 1
                 return None
             self._registra(risposta)
-            if getattr(risposta, "stop_reason", "") == "refusal":
+            motivo = getattr(risposta, "stop_reason", "")
+            if motivo == "refusal":
                 return None
-            if risposta.stop_reason != "tool_use":
+            if motivo == "max_tokens":
+                # Risposta tagliata a meta': meglio dirlo che consegnare un
+                # troncone. Resta annotato in /api/status per accorgersene.
+                self.ultimo_errore = "risposta troncata: alzare MAX_TOKEN_USCITA"
+                self.consumo.errori += 1
+                return None
+            if motivo != "tool_use":
                 return self._confeziona(risposta, ultimo_calcolo)
 
             messaggi.append({"role": "assistant", "content": risposta.content})
@@ -261,16 +275,21 @@ class Collaboratore:
                               "content": json.dumps(_risultato(calcolo, lettura), ensure_ascii=False)})
             messaggi.append({"role": "user", "content": esiti})
 
-        # Troppi giri: meglio dirlo che restare in silenzio.
+        # Troppe interrogazioni di fila senza arrivare a una risposta.
+        self.ultimo_errore = f"nessuna risposta dopo {MAX_GIRI} interrogazioni"
+        self.consumo.errori += 1
         return None
 
     def _confeziona(self, risposta: Any, calcolo: dict[str, Any] | None) -> dict[str, Any]:
         testo = "\n\n".join(b.text.strip() for b in risposta.content
                             if getattr(b, "type", "") == "text" and b.text.strip())
         calcolo = calcolo or {}
+        if not testo:
+            self.ultimo_errore = "il modello ha chiuso senza scrivere nulla"
+            self.consumo.errori += 1
         return {
             "ok": True,
-            "risposta": testo or "Non sono riuscito a formulare la risposta.",
+            "risposta": testo or "Non sono riuscito a mettere insieme la risposta. Riprova, magari dividendo la domanda in due.",
             "numero": calcolo.get("numero"),
             "righe": calcolo.get("righe", []),
             "totale_righe": calcolo.get("totale_righe", 0),

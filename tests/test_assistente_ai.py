@@ -117,6 +117,35 @@ class ConversazioneTests(BaseDati):
             self.assertNotIn(riservato, inviato)
         self.assertIn("NI1", inviato)                 # tracking e ordine servono
 
+    def test_due_domande_in_una_fanno_due_interrogazioni(self):
+        # "quante partite e quante di queste consegnate" sono due conteggi:
+        # il giro deve poter continuare invece di fermarsi al primo.
+        ai = collega([
+            RispostaFinta([BloccoStrumento(filtri(), "tu_1")], "tool_use"),
+            RispostaFinta([BloccoStrumento(filtri(categorie=["DELIVERED"]), "tu_2")], "tool_use"),
+            RispostaFinta([BloccoTesto("In tutto 3, di cui 2 consegnate.")], "end_turn"),
+        ])
+        esito = Assistente(self.db, durata_cache=0, collaboratore=ai).rispondi(
+            "quante partite e quante di queste consegnate?", oggi=OGGI)
+        self.assertEqual(esito["risposta"], "In tutto 3, di cui 2 consegnate.")
+        self.assertEqual(len(ai._cliente.richieste), 3)
+
+    def test_risposta_troncata_non_viene_spacciata_per_buona(self):
+        # Il ragionamento del modello consuma il tetto di uscita: se la
+        # risposta viene tagliata non va mostrata a meta'.
+        ai = collega([RispostaFinta([], "max_tokens")])
+        esito = Assistente(self.db, durata_cache=0, collaboratore=ai).rispondi(
+            "quante consegnate ieri?", oggi=OGGI)
+        self.assertTrue(esito["ripiego"])
+        self.assertEqual(esito["numero"], 2)
+        self.assertIn("troncata", ai.ultimo_errore)
+        self.assertEqual(ai.consumo.errori, 1)
+
+    def test_il_tetto_di_uscita_lascia_spazio_al_ragionamento(self):
+        ai = collega(conversazione_tipo(filtri(), "Due."))
+        Assistente(self.db, durata_cache=0, collaboratore=ai).rispondi("quante?", oggi=OGGI)
+        self.assertGreaterEqual(ai._cliente.richieste[0]["max_tokens"], 4000)
+
     def test_senza_chiamata_allo_strumento_risponde_e_basta(self):
         ai = collega([RispostaFinta([BloccoTesto("Ciao! Dimmi pure.")], "end_turn")])
         esito = Assistente(self.db, durata_cache=0, collaboratore=ai).rispondi("ciao", oggi=OGGI)
