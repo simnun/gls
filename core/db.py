@@ -1216,8 +1216,101 @@ class Database:
                 "pending_actions": pending_actions,
                 "inconsistency_count": sum(1 for x in shipments if x.get("has_inconsistency")),
                 "total_active": sum(1 for x in shipments if not x.get("closed")),
+                "mese": self.confronto_mensile(),
+                "serie": self.serie_giornaliera(),
                 "last_sync": self.latest_sync(),
             }
+
+    def confronto_mensile(self, oggi: Any = None) -> dict[str, Any]:
+        """I numeri del mese accanto a quelli dello stesso tratto di mese prima.
+
+        Il paragone e' fra periodi della stessa lunghezza: dal primo del mese a
+        oggi, contro dal primo del mese scorso allo stesso giorno. Confrontare
+        dieci giorni con un mese intero farebbe sembrare un crollo quello che
+        e' soltanto un mese appena cominciato.
+        """
+        from .timezones import ROME
+
+        oggi = oggi or datetime.now(ROME).date()
+        inizio_ora = oggi.replace(day=1)
+        fine_mese_prima = inizio_ora - timedelta(days=1)
+        inizio_prima = fine_mese_prima.replace(day=1)
+        giorni = (oggi - inizio_ora).days
+        fine_prima = min(inizio_prima + timedelta(days=giorni), fine_mese_prima)
+
+        def intervallo(conn, sql, da, a):
+            riga = conn.execute(sql, (da.isoformat(), a.isoformat())).fetchone()
+            return int((riga[0] if riga else 0) or 0)
+
+        per_categoria = (
+            "SELECT COUNT(*) FROM shipments"
+            " WHERE category=? AND substr(COALESCE(gls_event_at,''),1,10)>=?"
+            " AND substr(COALESCE(gls_event_at,''),1,10)<=?"
+        )
+        giacenze = (
+            "SELECT COUNT(*) FROM stock_cases"
+            " WHERE substr(COALESCE(entered_at,created_at),1,10)>=?"
+            " AND substr(COALESCE(entered_at,created_at),1,10)<=?"
+        )
+        with self.connect() as conn:
+            def categoria(nome, da, a):
+                riga = conn.execute(per_categoria, (nome, da.isoformat(), a.isoformat())).fetchone()
+                return int((riga[0] if riga else 0) or 0)
+            voci = {
+                "consegnate": {"ora": categoria("DELIVERED", inizio_ora, oggi),
+                               "prima": categoria("DELIVERED", inizio_prima, fine_prima)},
+                "giacenze": {"ora": intervallo(conn, giacenze, inizio_ora, oggi),
+                             "prima": intervallo(conn, giacenze, inizio_prima, fine_prima)},
+                "rientri": {"ora": categoria("RETURN", inizio_ora, oggi),
+                            "prima": categoria("RETURN", inizio_prima, fine_prima)},
+            }
+        return {
+            "voci": voci,
+            "giorni": giorni + 1,
+            "da": inizio_ora.isoformat(),
+            "a": oggi.isoformat(),
+            "prima_da": inizio_prima.isoformat(),
+            "prima_a": fine_prima.isoformat(),
+        }
+
+    def serie_giornaliera(self, giorni: int = 30, oggi: Any = None) -> dict[str, Any]:
+        """Consegne ed entrate in giacenza, giorno per giorno.
+
+        I giorni senza eventi tornano a zero e non vengono saltati: una linea
+        che salta i buchi racconta un andamento che non c'e' stato.
+        """
+        from .timezones import ROME
+
+        oggi = oggi or datetime.now(ROME).date()
+        inizio = oggi - timedelta(days=max(1, giorni) - 1)
+        asse = [(inizio + timedelta(days=i)).isoformat() for i in range((oggi - inizio).days + 1)]
+        consegnate = {g: 0 for g in asse}
+        giacenze = {g: 0 for g in asse}
+        with self.connect() as conn:
+            for riga in conn.execute(
+                "SELECT substr(COALESCE(gls_event_at,''),1,10) AS giorno, COUNT(*) AS quante"
+                " FROM shipments WHERE category='DELIVERED'"
+                " AND substr(COALESCE(gls_event_at,''),1,10)>=?"
+                " AND substr(COALESCE(gls_event_at,''),1,10)<=? GROUP BY 1",
+                (inizio.isoformat(), oggi.isoformat()),
+            ).fetchall():
+                if riga["giorno"] in consegnate:
+                    consegnate[riga["giorno"]] = int(riga["quante"] or 0)
+            for riga in conn.execute(
+                "SELECT substr(COALESCE(entered_at,created_at),1,10) AS giorno, COUNT(*) AS quante"
+                " FROM stock_cases WHERE substr(COALESCE(entered_at,created_at),1,10)>=?"
+                " AND substr(COALESCE(entered_at,created_at),1,10)<=? GROUP BY 1",
+                (inizio.isoformat(), oggi.isoformat()),
+            ).fetchall():
+                if riga["giorno"] in giacenze:
+                    giacenze[riga["giorno"]] = int(riga["quante"] or 0)
+        return {
+            "giorni": asse,
+            "serie": [
+                {"nome": "Consegnate", "valori": [consegnate[g] for g in asse]},
+                {"nome": "In giacenza", "valori": [giacenze[g] for g in asse]},
+            ],
+        }
 
     def get_shipment(self, tracking_number: str) -> dict[str, Any] | None:
         with self.connect() as conn:

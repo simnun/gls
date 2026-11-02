@@ -28,12 +28,40 @@ const state = {
   assistenteTracking: null,
 };
 
+// Una sola libreria di icone: stesso riquadro, stesso tratto, stessi
+// terminali. Nessuna emoticon, nessun carattere preso a prestito.
+const TRATTI = {
+  allarme: '<path d="M12 8v5"/><path d="M12 16.5h.01"/><circle cx="12" cy="12" r="9"/>',
+  orologio: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  spunta: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  cerca: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>',
+  aggiorna: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
+  impostazioni: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
+  chiudi: '<path d="M6 6l12 12M18 6L6 18"/>',
+  freccia: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  su: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  giu: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  ordina: '<path d="M8 9l0 10M5 16l3 3 3-3"/><path d="M16 15V5M13 8l3-3 3 3"/>',
+  busta: '<rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/>',
+  telefono: '<path d="M7 3.5h3l1.5 4-2 1.5a12 12 0 0 0 5.5 5.5l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 5 7.7 2 2 0 0 1 7 3.5z"/>',
+  piu: '<path d="M12 5v14M5 12h14"/>',
+  vietato: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5l7 7"/>',
+  pacco: '<path d="M20.5 7.5l-8.5-4.5-8.5 4.5v9l8.5 4.5 8.5-4.5z"/><path d="M3.5 7.5l8.5 4.5 8.5-4.5M12 12v9"/>',
+  punto: '<circle cx="12" cy="12" r="4"/>',
+  novita: '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2"/>',
+};
+function icona(nome, classe = 'icona') {
+  return `<svg class="${classe}" viewBox="0 0 24 24" fill="none" stroke="currentColor"`
+    + ` stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+    + `${TRATTI[nome] || ''}</svg>`;
+}
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
 const severityLabels = {
-  CRITICAL: 'MASSIMA', WARNING: 'ALTA', WATCH: 'OSSERVAZIONE',
-  INFO: 'INFORMATIVO', NORMAL: 'NORMALE'
+  CRITICAL: 'Massima', WARNING: 'Alta', WATCH: 'Osservazione',
+  INFO: 'Informativo', NORMAL: 'Normale'
 };
 const workflowLabels = {
   NEW: 'Da verificare', IN_PROGRESS: 'In lavorazione', WAITING_CUSTOMER: 'In lavorazione',
@@ -140,21 +168,21 @@ function statoGestione(row) {
     || row.category === 'STORAGE';
 
   if (rifiutato) return {
-    classe: 'rifiutato', icona: '✕', testo: 'Svincolo respinto',
+    classe: 'rifiutato', segno: 'vietato', testo: 'Svincolo respinto',
     dettaglio: (svincoli[0] && svincoli[0].gls_result)
       ? `GLS non ha accettato l\u2019istruzione: ${svincoli[0].gls_result}`
       : 'GLS non ha accettato l\u2019istruzione di svincolo: va ripetuta o gestita fuori piattaforma.',
   };
   if (svincolato) return {
-    classe: 'inviato', icona: '✓', testo: 'Svincolo inviato',
+    classe: 'inviato', segno: 'spunta', testo: 'Svincolo inviato',
     dettaglio: 'Lo svincolo e\u2019 gia\u2019 stato inviato a GLS: si attende il riscontro.',
   };
   if (giacenzaAperta) return {
-    classe: 'da-svincolare', icona: '⚠', testo: 'Da svincolare',
+    classe: 'da-svincolare', segno: 'allarme', testo: 'Da svincolare',
     dettaglio: 'Pratica gia\u2019 gestita e giacenza aperta: manca solo lo svincolo.',
   };
   if (CATEGORIE_VERSO_GIACENZA.includes(row.category)) return {
-    classe: 'gestita', icona: '●', testo: 'Gestita · attende giacenza',
+    classe: 'gestita', segno: 'punto', testo: 'Gestita · attende giacenza',
     dettaglio: 'Le informazioni sono gia\u2019 state raccolte: si attende che GLS apra la giacenza.',
   };
   return null;
@@ -168,13 +196,13 @@ function pastigliaNovita(row) {
   const quando = formatDate(row.unread_event_at);
   const testo = String(row.gls_status || '').trim();
   const titolo = testo ? `${quando} · ${testo}` : `Aggiornamento GLS del ${quando}`;
-  return `<div class="news-chip" title="${esc(titolo)}"><span>!</span>Novit\u00e0 GLS</div>`;
+  return `<div class="news-chip" title="${esc(titolo)}">${icona('novita', 'icona mini')}Novit\u00e0 GLS</div>`;
 }
 
 function pastigliaGestione(row) {
   const s = statoGestione(row);
   if (!s) return '';
-  return `<div class="handled-chip ${s.classe}" title="${esc(s.dettaglio)}"><span>${s.icona}</span>${esc(s.testo)}</div>`;
+  return `<div class="handled-chip ${s.classe}" title="${esc(s.dettaglio)}">${icona(s.segno, 'icona mini')}${esc(s.testo)}</div>`;
 }
 
 function priorityRank(row) {
@@ -195,7 +223,7 @@ function updateSortIndicators(selector, key, dir) {
   $$(selector).forEach(btn => {
     const span = btn.querySelector('span');
     if (!span) return;
-    span.textContent = btn.dataset.sort === key ? (dir === 'asc' ? '↑' : '↓') : '↕';
+    span.innerHTML = icona(btn.dataset.sort === key ? (dir === 'asc' ? 'su' : 'giu') : 'ordina', 'icona mini');
     btn.classList.toggle('active', btn.dataset.sort === key);
   });
 }
@@ -339,7 +367,7 @@ function stockOutcomeKey(item) {
 
 function stockOutcomeBadge(item) {
   const key = stockOutcomeKey(item);
-  const labels = { OPEN:'IN GIACENZA', DELIVERED:'CONSEGNATA', RETURN:'RIENTRO', MOVED:'RIPARTITA', OTHER:'DA VERIFICARE' };
+  const labels = { OPEN:'In giacenza', DELIVERED:'Consegnata', RETURN:'Rientro', MOVED:'Ripartita', OTHER:'Da verificare' };
   const cls = { OPEN:'danger', DELIVERED:'success', RETURN:'warning', MOVED:'worked', OTHER:'neutral' };
   return `<span class="stock-outcome ${cls[key] || 'neutral'}">${esc(labels[key] || key)}</span>`;
 }
@@ -508,6 +536,142 @@ function aggiornaTendinaStati() {
   }
 }
 
+const MESI_NOMI = ['gennaio','febbraio','marzo','aprile','maggio','giugno',
+  'luglio','agosto','settembre','ottobre','novembre','dicembre'];
+
+// Un numero da solo non dice se e' tanto o poco: accanto va messo lo stesso
+// tratto del mese prima, confrontando periodi della stessa lunghezza.
+function renderMese() {
+  const zona = $('#mesePanel');
+  if (!zona) return;
+  const dati = state.data?.mese;
+  if (!dati) { zona.innerHTML = ''; return; }
+  const meseScorso = MESI_NOMI[Number(String(dati.prima_da).slice(5, 7)) - 1] || '';
+  const voci = [
+    ['consegnate', 'Consegnate questo mese'],
+    ['giacenze', 'Entrate in giacenza'],
+    ['rientri', 'Rientrate al mittente'],
+  ];
+  zona.innerHTML = voci.map(([chiave, titolo]) => {
+    const v = (dati.voci || {})[chiave] || {ora: 0, prima: 0};
+    const ora = Number(v.ora || 0), prima = Number(v.prima || 0);
+    let confronto;
+    if (!prima) {
+      confronto = `<span>nessun dato nello stesso tratto di ${esc(meseScorso)}</span>`;
+    } else {
+      const scarto = Math.round(((ora - prima) / prima) * 100);
+      const verso = scarto > 0 ? 'su' : (scarto < 0 ? 'giu' : 'punto');
+      const segno = scarto > 0 ? '+' : '';
+      confronto = `${icona(verso, 'icona mini')}<b>${segno}${scarto}%</b>`
+        + `<span>sui primi ${dati.giorni} giorni di ${esc(meseScorso)} (${prima})</span>`;
+    }
+    return `<div class="mese-card">
+      <div class="voce">${esc(titolo)}</div>
+      <div class="cifra">${ora}</div>
+      <div class="confronto">${confronto}</div>
+    </div>`;
+  }).join('');
+}
+
+// Due serie, due colori soltanto: l'accento e un grigio. Il grigio non
+// passerebbe il controllo di saturazione di una palette categorica, ed e'
+// voluto: la palette e' neutra. In cambio l'identita' non si regge sul
+// colore, perche' ogni linea porta il proprio nome stampato in fondo.
+const GRAF_COLORI = ['var(--accent)', '#7d8794'];
+
+function renderAndamento() {
+  const tela = $('#grafico');
+  const legenda = $('#grafLegenda');
+  const dati = state.data?.serie;
+  if (!tela || !legenda) return;
+  if (!dati || !(dati.giorni || []).length) { tela.innerHTML = ''; legenda.innerHTML = ''; return; }
+
+  const giorni = dati.giorni, serie = dati.serie || [];
+  // Il disegno segue la larghezza vera del contenitore invece di essere
+  // stirato: se si stira, si stirano anche i testi e le linee.
+  const L = 32, R = 80, T = 16, B = 32;                      // margini: multipli di 8
+  const W = Math.max(560, Math.round(tela.clientWidth || 760)), H = 192;
+  const massimo = Math.max(1, ...serie.flatMap(s => s.valori));
+  const passo = massimo <= 4 ? 1 : Math.ceil(massimo / 4);
+  const cima = Math.ceil(massimo / passo) * passo;
+  const x = i => L + (giorni.length < 2 ? 0 : i * (W - L - R) / (giorni.length - 1));
+  const y = v => T + (H - T - B) * (1 - v / cima);
+
+  const tacche = [];
+  for (let v = 0; v <= cima; v += passo) tacche.push(v);
+  const griglia = tacche.map(v => `<line class="graf-griglia" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>`
+    + `<text class="graf-asse" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join('');
+
+  const giorno = g => `${g.slice(8, 10)}/${g.slice(5, 7)}`;
+  const quante = Math.min(5, giorni.length);
+  const indici = Array.from({length: quante}, (_, k) => Math.round(k * (giorni.length - 1) / (quante - 1)));
+  const asseX = indici.map(i => `<text class="graf-asse" x="${x(i)}" y="${H - 8}" text-anchor="middle">${giorno(giorni[i])}</text>`).join('');
+
+  const linee = serie.map((s, n) => {
+    const d = s.valori.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+    const ultimo = s.valori[s.valori.length - 1];
+    return `<path class="graf-linea" d="${d}" stroke="${GRAF_COLORI[n]}"/>`
+      + `<text class="graf-etichetta" x="${W - R + 8}" y="${y(ultimo) + 4}" fill="${GRAF_COLORI[n]}">${esc(s.nome)}</text>`;
+  }).join('');
+
+  tela.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Andamento degli ultimi ${giorni.length} giorni">
+    ${griglia}${asseX}${linee}
+    <g id="grafMirino" style="opacity:0"><line class="graf-mirino" y1="${T}" y2="${H - B}"/>
+      ${serie.map((_, n) => `<circle class="graf-punto" r="4" fill="${GRAF_COLORI[n]}"/>`).join('')}</g>
+    <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" id="grafZona"/>
+  </svg><div class="graf-tooltip" id="grafTooltip"></div>`;
+
+  legenda.innerHTML = serie.map((s, n) =>
+    `<span><i style="background:${GRAF_COLORI[n]}"></i>${esc(s.nome)}</span>`).join('');
+
+  collegaMirino(tela, {giorni, serie, x, y, L, R, W});
+}
+
+// Un grafico che non risponde al passaggio del mouse costringe a stimare a
+// occhio: il mirino dice il giorno e i due valori esatti.
+function collegaMirino(tela, g) {
+  const svg = tela.querySelector('svg');
+  const mirino = tela.querySelector('#grafMirino');
+  const tooltip = tela.querySelector('#grafTooltip');
+  const zona = tela.querySelector('#grafZona');
+  if (!svg || !zona) return;
+  const linea = mirino.querySelector('line');
+  const punti = [...mirino.querySelectorAll('circle')];
+  const giorno = s => `${s.slice(8, 10)}/${s.slice(5, 7)}`;
+
+  zona.addEventListener('mousemove', (ev) => {
+    const riquadro = svg.getBoundingClientRect();
+    const scala = g.W / riquadro.width;
+    const dentro = (ev.clientX - riquadro.left) * scala;
+    let i = 0, minimo = Infinity;
+    g.giorni.forEach((_, k) => {
+      const distanza = Math.abs(g.x(k) - dentro);
+      if (distanza < minimo) { minimo = distanza; i = k; }
+    });
+    linea.setAttribute('x1', g.x(i)); linea.setAttribute('x2', g.x(i));
+    punti.forEach((p, n) => {
+      p.setAttribute('cx', g.x(i));
+      p.setAttribute('cy', g.y(g.serie[n].valori[i]));
+    });
+    mirino.style.opacity = '1';
+    tooltip.innerHTML = `<b>${giorno(g.giorni[i])}</b><br>`
+      + g.serie.map(s => `${esc(s.nome)}: ${s.valori[i]}`).join('<br>');
+    tooltip.style.opacity = '1';
+    tooltip.style.left = Math.min(riquadro.width - 120, (g.x(i) / scala) + 12) + 'px';
+    tooltip.style.top = '8px';
+  });
+  zona.addEventListener('mouseleave', () => {
+    mirino.style.opacity = '0';
+    tooltip.style.opacity = '0';
+  });
+}
+
+let attesaRidisegno = null;
+window.addEventListener('resize', () => {
+  clearTimeout(attesaRidisegno);
+  attesaRidisegno = setTimeout(renderAndamento, 150);
+});
+
 function renderKpis() {
   const rows = applyDateFilter([...(state.data?.shipments || [])]);
   const actionable = rows.filter(daVerificare);
@@ -535,6 +699,8 @@ function renderKpis() {
   $('#tabDeliveringCount').textContent = inConsegna;
   $('#tabActiveCount').textContent = attive;
   segnalaStatiDaClassificare(unknown);
+  renderMese();
+  renderAndamento();
   $('#tabAllCount').textContent = state.tutteCaricate
     ? rows.length
     : rows.length + Number(chiuse.totale || 0);
@@ -627,7 +793,7 @@ function renderTable() {
         <td><div class="event-title">${esc(current)}</div>${note ? `<div class="event-note" title="${esc(note)}">${esc(note)}</div>` : ''}</td>
         <td><div>${esc(age(row.gls_event_at))}</div><div class="cell-sub">${esc(formatDate(row.gls_event_at))}</div></td>
         <td>${pastigliaNovita(row)}${pastigliaGestione(row)}<span class="workflow-pill ${esc(row.workflow_status)}">${esc(workflowLabels[row.workflow_status] || row.workflow_status)}</span>${activity}</td>
-        <td><button class="row-btn" data-open="${esc(row.tracking_number)}">Gestisci →</button></td>
+        <td><button class="row-btn" data-open="${esc(row.tracking_number)}">Gestisci ${icona("freccia", "icona mini")}</button></td>
       </tr>`;
   }).join('');
   empty.classList.toggle('hidden', rows.length !== 0);
@@ -654,7 +820,7 @@ function renderEmptyState(empty, monitored) {
   // Distinzione essenziale: la coda e' davvero vuota, oppure ci sono righe che
   // i filtri stanno nascondendo? Senza dirlo, sembra che i dati siano spariti.
   if (filtriAttivi()) {
-    empty.innerHTML = `<div class="empty-icon">⌕</div>
+    empty.innerHTML = `<div class="empty-icon">${icona("cerca")}</div>
       <h3>Nessun risultato con i filtri attivi</h3>
       <p>Ci sono <b>${monitored}</b> spedizioni monitorate, ma nessuna corrisponde ai filtri impostati.</p>
       <div class="empty-actions"><button class="btn secondary" type="button" data-clear-filters>Azzera i filtri</button></div>`;
@@ -693,7 +859,7 @@ function renderEmptyStateVuota(empty, monitored) {
 
   const [titolo, dettaglio] = messaggi[state.view] || ['Niente da mostrare', ''];
   const mostraPulsante = !nessunDato && !['active', 'all'].includes(state.view);
-  empty.innerHTML = `<div class="empty-icon">✓</div><h3>${titolo}</h3><p>${dettaglio}</p>${mostraPulsante ? `<div class="empty-actions">${vaiATutte}</div>` : ''}`;
+  empty.innerHTML = `<div class="empty-icon">${icona("spunta")}</div><h3>${titolo}</h3><p>${dettaglio}</p>${mostraPulsante ? `<div class="empty-actions">${vaiATutte}</div>` : ''}`;
   empty.querySelector('[data-goto-view]')?.addEventListener('click', () => switchView('active'));
 }
 
@@ -701,7 +867,7 @@ async function openDrawer(tracking) {
   state.selectedTracking = tracking;
   try {
     const item = await api(`/api/shipment/${encodeURIComponent(tracking)}`);
-    $('#drawerOrder').textContent = item.order_name || 'SPEDIZIONE GLS';
+    $('#drawerOrder').textContent = item.order_name || 'Spedizione GLS';
     $('#drawerTitle').textContent = item.customer_name || item.tracking_number;
     $('#drawerContent').innerHTML = drawerHtml(item);
     $('#drawerBackdrop').classList.remove('hidden');
@@ -748,7 +914,7 @@ function drawerHtml(item) {
       </div>
     </div>`
     : item.last_operator_action ? `
-    <div class="internal-banner"><div class="icon">✓</div><div><strong>Intervento già registrato: ${esc(item.last_operator_action)}</strong><span>${esc(item.last_operator_name || 'Operatore')} · ${esc(formatDate(item.last_operator_action_at))}. Lo stato GLS può restare invariato finché la sede non recepisce l'operazione.</span></div></div>` : '';
+    <div class="internal-banner"><div class="icon">${icona("spunta")}</div><div><strong>Intervento già registrato: ${esc(item.last_operator_action)}</strong><span>${esc(item.last_operator_name || 'Operatore')} · ${esc(formatDate(item.last_operator_action_at))}. Lo stato GLS può restare invariato finché la sede non recepisce l'operazione.</span></div></div>` : '';
 
   // La novita' arrivata da GLS su una pratica gia' in lavorazione: va vista
   // subito, prima di ogni altra cosa nel pannello.
@@ -772,7 +938,7 @@ function drawerHtml(item) {
         const releases = sc.release_requests || [];
         const lastRelease = releases[0];
         const outcome = sc.status === 'OPEN' ? 'Ancora in giacenza' : (sc.outcome_state || sc.outcome_category || 'Uscita dalla giacenza');
-        return `<div class="stock-case-card ${sc.status === 'OPEN' ? 'open' : 'closed'}"><div class="stock-case-head"><strong>Entrata ${esc(formatDate(sc.entered_at))}</strong><span>${sc.status === 'OPEN' ? 'APERTA' : 'CHIUSA'}</span></div><div class="stock-case-state">${esc(sc.entry_state || sc.entry_note || 'Spedizione in giacenza')}</div>${lastRelease ? `<div class="stock-instruction"><b>Istruzione inviata:</b> ${esc(lastRelease.release_label)} · ${esc(lastRelease.operator_name || 'Operatore')} · ${esc(formatDate(lastRelease.created_at))}<br><span>${lastRelease.gls_success ? 'Ricevuta da GLS' : 'Non accettata da GLS'}${lastRelease.gls_result ? ` · ${esc(lastRelease.gls_result)}` : ''}</span>${lastRelease.note ? `<br><em>${esc(lastRelease.note)}</em>` : ''}</div>` : '<div class="stock-instruction muted">Nessuna istruzione API registrata per questa giacenza.</div>'}<div class="stock-outcome-line"><b>Esito:</b> ${esc(outcome)}${sc.outcome_event_at ? ` · ${esc(formatDate(sc.outcome_event_at))}` : sc.exited_at ? ` · uscita ${esc(formatDate(sc.exited_at))}` : ''}</div></div>`;
+        return `<div class="stock-case-card ${sc.status === 'OPEN' ? 'open' : 'closed'}"><div class="stock-case-head"><strong>Entrata ${esc(formatDate(sc.entered_at))}</strong><span>${sc.status === 'OPEN' ? 'Aperta' : 'Chiusa'}</span></div><div class="stock-case-state">${esc(sc.entry_state || sc.entry_note || 'Spedizione in giacenza')}</div>${lastRelease ? `<div class="stock-instruction"><b>Istruzione inviata:</b> ${esc(lastRelease.release_label)} · ${esc(lastRelease.operator_name || 'Operatore')} · ${esc(formatDate(lastRelease.created_at))}<br><span>${lastRelease.gls_success ? 'Ricevuta da GLS' : 'Non accettata da GLS'}${lastRelease.gls_result ? ` · ${esc(lastRelease.gls_result)}` : ''}</span>${lastRelease.note ? `<br><em>${esc(lastRelease.note)}</em>` : ''}</div>` : '<div class="stock-instruction muted">Nessuna istruzione API registrata per questa giacenza.</div>'}<div class="stock-outcome-line"><b>Esito:</b> ${esc(outcome)}${sc.outcome_event_at ? ` · ${esc(formatDate(sc.outcome_event_at))}` : sc.exited_at ? ` · uscita ${esc(formatDate(sc.exited_at))}` : ''}</div></div>`;
       }).join('')}
     </div></div>` : '';
 
@@ -829,15 +995,15 @@ function drawerHtml(item) {
     </div>
 
     <div class="section-box"><div class="section-title-row"><h3>Registra intervento</h3><span>ogni azione entra nello storico unico</span></div><div class="quick-actions">
-      <button class="quick-action" data-action="CUSTOMER_MESSAGE"><span class="qa-icon">✉</span><span>Messaggio cliente inviato</span></button>
-      <button class="quick-action" data-action="CUSTOMER_CALLED"><span class="qa-icon">☏</span><span>Cliente chiamato</span></button>
-      <button class="quick-action" data-action="GLS_CONTACTED"><span class="qa-icon">G</span><span>GLS contattato</span></button>
-      <button class="quick-action" data-action="NOTE"><span class="qa-icon">＋</span><span>Registra nota</span></button>
+      <button class="quick-action" data-action="CUSTOMER_MESSAGE"><span class="qa-icon">${icona("busta")}</span><span>Messaggio cliente inviato</span></button>
+      <button class="quick-action" data-action="CUSTOMER_CALLED"><span class="qa-icon">${icona("telefono")}</span><span>Cliente chiamato</span></button>
+      <button class="quick-action" data-action="GLS_CONTACTED"><span class="qa-icon">${icona("pacco")}</span><span>GLS contattato</span></button>
+      <button class="quick-action" data-action="NOTE"><span class="qa-icon">${icona("piu")}</span><span>Registra nota</span></button>
     </div><textarea id="quickActionNote" class="action-note" placeholder="Nota opzionale: es. cliente conferma indirizzo, contattata sede GLS…"></textarea></div>
 
     ${releaseBox}${stockHistoryBox}
 
-    <div class="section-box"><div class="section-title-row"><h3>Stato pratica interno</h3><span>puoi lasciarla aperta oppure chiuderla manualmente</span></div><div class="workflow-buttons"><button class="workflow-btn ${item.workflow_status==='IN_PROGRESS'?'active':''}" data-workflow="IN_PROGRESS">IN LAVORAZIONE</button><button class="workflow-btn ${['RESOLVED','IGNORED'].includes(item.workflow_status)?'active':''}" data-workflow="RESOLVED">CHIUSA</button></div><textarea id="operatorNote" class="operator-note" placeholder="Nota pratica generale…">${esc(item.operator_note || '')}</textarea><div class="link-row"><button id="saveWorkflowBtn" class="btn primary">Salva pratica</button></div></div>
+    <div class="section-box"><div class="section-title-row"><h3>Stato pratica interno</h3><span>puoi lasciarla aperta oppure chiuderla manualmente</span></div><div class="workflow-buttons"><button class="workflow-btn ${item.workflow_status==='IN_PROGRESS'?'active':''}" data-workflow="IN_PROGRESS">In lavorazione</button><button class="workflow-btn ${['RESOLVED','IGNORED'].includes(item.workflow_status)?'active':''}" data-workflow="RESOLVED">Chiusa</button></div><textarea id="operatorNote" class="operator-note" placeholder="Nota pratica generale…">${esc(item.operator_note || '')}</textarea><div class="link-row"><button id="saveWorkflowBtn" class="btn primary">Salva pratica</button></div></div>
 
     <div class="section-box"><div class="section-title-row"><h3>Storico completo</h3><span>GLS + attività operatori · ${combined.length} eventi</span></div><div class="timeline combined-timeline">
       ${combined.length ? combined.map(e => `<div class="timeline-item ${e.source==='TEAM'?'team':esc(e.severity)}">${e.actionId && e.actionId === ultimaAzioneId ? `<button class="undo-action" type="button" data-undo-action="${e.actionId}" title="Cancella questa operazione: \u00e8 l\u2019ultima registrata da un operatore">\u00d7</button>` : ''}<div class="timeline-time"><span class="source-badge ${e.source==='TEAM'?'team':'gls'}">${e.source}</span> ${esc(formatDate(e.when))}${e.meta ? ` · ${esc(e.meta)}` : ''}</div><div class="timeline-state">${esc(e.title)}</div>${e.note ? `<div class="timeline-note">${esc(e.note)}</div>` : ''}</div>`).join('') : '<div class="muted">Nessuno storico disponibile.</div>'}
@@ -988,8 +1154,8 @@ function setSyncBusy(busy) {
   btn.classList.toggle('busy', Boolean(busy));
   btn.title = busy ? 'Sincronizzazione già in corso' : 'Aggiorna i dati da Shopify e GLS';
   btn.innerHTML = busy
-    ? '<span class="btn-icon spin">↻</span> Aggiornamento…'
-    : '<span class="btn-icon">↻</span> Aggiorna';
+    ? `<span class="btn-icon spin">${icona('aggiorna')}</span> Aggiornamento\u2026`
+    : `<span class="btn-icon">${icona('aggiorna')}</span> Aggiorna`;
 }
 
 function renderSyncProgress(p) {
