@@ -26,7 +26,6 @@ const state = {
   // Spedizioni dietro all'ultima risposta dell'assistente: la vista le mostra
   // esattamente come sono state contate, senza riapplicare i filtri a schermo.
   assistenteTracking: null,
-  assistenteApertoUnaVolta: false,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -1287,6 +1286,8 @@ setInterval(() => { loadDashboard({quiet:true}); loadStockHistory({quiet:true});
 // stessa fonte, cosi' "mostrami quali" apre esattamente cio' che e' stato
 // contato e l'operatore puo' verificare con i suoi occhi.
 
+const SEGNO_AI = '<svg viewBox="0 0 24 24"><path d="M12 4l2.1 5.9L20 12l-5.9 2.1L12 20l-2.1-5.9L4 12l5.9-2.1L12 4z"/></svg>';
+
 function impostaAssistente() {
   const bottone = $('#assistantBtn');
   const pannello = $('#assistantPanel');
@@ -1294,95 +1295,111 @@ function impostaAssistente() {
   const log = $('#assistantLog');
   const form = $('#assistantForm');
   const input = $('#assistantInput');
+  const invia = $('#assistantSend');
+  let inAttesa = false;
+  let storia = [];
 
   function apri() {
     pannello.classList.remove('hidden');
+    bottone.classList.add('aperto');
     bottone.setAttribute('aria-expanded', 'true');
-    input.focus();
-    if (!state.assistenteApertoUnaVolta) {
-      state.assistenteApertoUnaVolta = true;
-      bollaAssistente('Chiedimi quello che vuoi sulle spedizioni: conto io sui dati del monitor.');
-      caricaSuggerimenti();
-    }
+    if (!log.children.length) benvenuto();
+    setTimeout(() => input.focus(), 60);
   }
   function chiudi() {
     pannello.classList.add('hidden');
+    bottone.classList.remove('aperto');
     bottone.setAttribute('aria-expanded', 'false');
+  }
+  function benvenuto() {
+    log.innerHTML = `<div class="assistant-hello">
+      <div class="hello-mark">${SEGNO_AI}</div>
+      <h3>Come posso aiutarti?</h3>
+      <p>Chiedimi quello che vuoi sulle spedizioni, sulle giacenze o sul lavoro del team: i conti li faccio sui dati di questo monitor.</p>
+    </div>`;
   }
 
   bottone.addEventListener('click', () => {
     pannello.classList.contains('hidden') ? apri() : chiudi();
   });
   $('#assistantClose').addEventListener('click', chiudi);
+  $('#assistantReset').addEventListener('click', () => { storia = []; benvenuto(); input.focus(); });
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && !pannello.classList.contains('hidden')) chiudi();
+  });
+
+  // Il campo cresce con il testo e si invia con Invio: a capo con Maiusc+Invio.
+  function adattaAltezza() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    invia.disabled = !input.value.trim() || inAttesa;
+  }
+  input.addEventListener('input', adattaAltezza);
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); form.requestSubmit(); }
   });
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const domanda = input.value.trim();
-    if (!domanda) return;
+    if (!domanda || inAttesa) return;
     input.value = '';
+    adattaAltezza();
     await chiediAssistente(domanda);
   });
 
-  async function caricaSuggerimenti() {
-    try {
-      const esito = await api('/api/assistente', {method: 'POST', body: JSON.stringify({domanda: ''})});
-      mostraSuggerimenti(esito.suggerimenti || []);
-    } catch (err) { /* i suggerimenti sono un di piu': se mancano, pazienza */ }
-  }
-
-  function mostraSuggerimenti(voci) {
-    const zona = $('#assistantChips');
-    zona.innerHTML = voci.map(v => `<button type="button">${esc(v)}</button>`).join('');
-    [...zona.querySelectorAll('button')].forEach(b => b.addEventListener('click', () => {
-      chiediAssistente(b.textContent);
-    }));
+  function turno(classe) {
+    const vuoto = log.querySelector('.assistant-hello');
+    if (vuoto) vuoto.remove();
+    const riga = document.createElement('div');
+    riga.className = `assistant-turn ${classe}`;
+    const bolla = document.createElement('div');
+    bolla.className = 'bolla';
+    if (classe.startsWith('sua')) {
+      const faccia = document.createElement('div');
+      faccia.className = 'mini-avatar';
+      faccia.innerHTML = SEGNO_AI;
+      riga.appendChild(faccia);
+    }
+    riga.appendChild(bolla);
+    log.appendChild(riga);
+    log.scrollTop = log.scrollHeight;
+    return { riga, bolla };
   }
 
   async function chiediAssistente(domanda) {
-    // Dopo la prima domanda i suggerimenti hanno gia' fatto il loro lavoro:
-    // lo spazio serve alle risposte.
-    $('#assistantChips').classList.add('hidden');
-    bollaAssistente(domanda, 'mia');
-    const attesa = bollaAssistente('Sto contando…');
+    turno('mia').bolla.textContent = domanda;
+    const attesa = turno('sua');
+    attesa.bolla.innerHTML = '<div class="assistant-dots"><i></i><i></i><i></i></div>';
+    inAttesa = true;
+    adattaAltezza();
     try {
       const esito = await api('/api/assistente', {
-        method: 'POST', body: JSON.stringify({domanda}),
+        method: 'POST', body: JSON.stringify({domanda, storia}),
       });
-      attesa.remove();
+      attesa.riga.remove();
       mostraRisposta(esito);
+      storia = [...storia, {ruolo: 'operatore', testo: domanda},
+                {ruolo: 'assistente', testo: esito.risposta || ''}].slice(-8);
     } catch (err) {
-      attesa.remove();
-      bollaAssistente(`Non sono riuscito a rispondere: ${err.message}`, 'sua errore');
+      attesa.riga.remove();
+      turno('sua errore').bolla.textContent = `Non sono riuscito a rispondere: ${err.message}`;
+    } finally {
+      inAttesa = false;
+      adattaAltezza();
+      input.focus();
     }
-  }
-
-  function bollaAssistente(testo, classe = 'sua') {
-    const bolla = document.createElement('div');
-    bolla.className = `assistant-msg ${classe}`;
-    bolla.textContent = testo;
-    log.appendChild(bolla);
-    log.scrollTop = log.scrollHeight;
-    return bolla;
   }
 
   function mostraRisposta(esito) {
-    const bolla = document.createElement('div');
-    bolla.className = 'assistant-msg sua';
-    const pezzi = [`<div>${esc(esito.risposta || '')}</div>`];
-    const lettura = esito.interpretazione || {};
-    const chips = lettura.chips || [];
-    // Si vede sempre chi ha letto la domanda: le regole del sito, gratis, o
-    // Claude, che costa. Il numero in ogni caso esce dal database.
-    const fonte = lettura.fonte === 'claude'
-      ? `<span class="fonte-ai" title="Domanda interpretata da Claude: il conteggio resta del database">Claude</span>`
-      : '';
-    if (chips.length || fonte) {
-      pezzi.push(`<div class="assistant-read" title="Come ho letto la domanda">` + fonte
-        + chips.map(c => `<span>${esc(c.testo)}</span>`).join('') + `</div>`);
+    const { bolla } = turno('sua');
+    const pezzi = [`<div class="testo">${esc(esito.risposta || '').replace(/\n/g, '<br>')}</div>`];
+    // L'unica nota che resta e' quella che serve: quando risponde il motore a
+    // regole al posto del collega, la risposta e' piu' secca e va detto.
+    if (esito.ripiego) {
+      pezzi.push(`<div class="assistant-warn">Non sono riuscito a ragionarci sopra: questa e\u2019 una risposta essenziale, calcolata dalle sole regole del monitor.</div>`);
+    } else if (esito.avviso) {
+      pezzi.push(`<div class="assistant-warn">${esc(esito.avviso)}</div>`);
     }
-    if (esito.avviso) pezzi.push(`<div class="assistant-warn">${esc(esito.avviso)}</div>`);
     if (esito.tabella && (esito.tabella.righe || []).length) {
       const t = esito.tabella;
       pezzi.push(`<table class="assistant-table"><thead><tr>`
@@ -1393,12 +1410,13 @@ function impostaAssistente() {
     }
     const righe = esito.righe || [];
     if (righe.length) {
-      pezzi.push(`<button class="assistant-show" type="button">Mostrami quali (${righe.length}${esito.totale_righe > righe.length ? ' di ' + esito.totale_righe : ''}) →</button>`);
+      const quante = esito.totale_righe > righe.length
+        ? `${righe.length} di ${esito.totale_righe}` : `${righe.length}`;
+      pezzi.push(`<button class="assistant-show" type="button">Mostrami quali (${quante}) <span aria-hidden="true">&rarr;</span></button>`);
     }
     bolla.innerHTML = pezzi.join('');
     const mostra = bolla.querySelector('.assistant-show');
     if (mostra) mostra.addEventListener('click', () => apriElenco(righe));
-    log.appendChild(bolla);
     log.scrollTop = log.scrollHeight;
   }
 

@@ -110,19 +110,33 @@
 
   <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="drawer" class="drawer" aria-hidden="true"><div class="drawer-header"><div><div id="drawerOrder" class="eyebrow"></div><h2 id="drawerTitle">Dettaglio spedizione</h2></div><button id="drawerClose" class="icon-btn" aria-label="Chiudi">×</button></div><div id="drawerContent" class="drawer-content"></div></aside>
-  <button id="assistantBtn" class="assistant-fab" type="button" aria-haspopup="dialog" aria-expanded="false" title="Chiedi all'assistente">
-    <span aria-hidden="true">&#128172;</span><b>Chiedi</b>
+  <button id="assistantBtn" class="assistant-fab" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="Apri l'assistente">
+    <svg class="fab-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l2.1 5.9L20 12l-5.9 2.1L12 20l-2.1-5.9L4 12l5.9-2.1L12 4z"/></svg>
+    <svg class="fab-close" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>
   </button>
   <section id="assistantPanel" class="assistant-panel hidden" role="dialog" aria-label="Assistente del monitor">
     <header class="assistant-head">
-      <div><strong>Assistente</strong><span>risponde leggendo i dati di questo monitor</span></div>
-      <button id="assistantClose" class="icon-btn" aria-label="Chiudi">&times;</button>
+      <div class="assistant-id">
+        <span class="assistant-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4l2.1 5.9L20 12l-5.9 2.1L12 20l-2.1-5.9L4 12l5.9-2.1L12 4z"/></svg></span>
+        <div><strong>Assistente</strong><span id="assistantState">legge i dati del monitor</span></div>
+      </div>
+      <div class="assistant-tools">
+        <button id="assistantReset" class="assistant-icon" type="button" title="Nuova conversazione" aria-label="Nuova conversazione">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 1 2.5 5.8M4 19v-5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="assistantClose" class="assistant-icon" type="button" title="Chiudi" aria-label="Chiudi">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
     </header>
     <div id="assistantLog" class="assistant-log" aria-live="polite"></div>
-    <div id="assistantChips" class="assistant-suggestions"></div>
     <form id="assistantForm" class="assistant-form" autocomplete="off">
-      <input id="assistantInput" type="text" maxlength="300" placeholder="Quante sono in giacenza adesso?">
-      <button class="btn primary" type="submit">Chiedi</button>
+      <div class="assistant-field">
+        <textarea id="assistantInput" rows="1" maxlength="400" placeholder="Scrivi una domanda…"></textarea>
+        <button id="assistantSend" class="assistant-send" type="submit" disabled aria-label="Invia">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
     </form>
   </section>
   <div id="toast" class="toast hidden"></div>

@@ -124,38 +124,85 @@ button{cursor:pointer}
 .internal-banner.handled.gestita strong{color:#344054}
 .handled-note{display:block;margin:5px 0 3px;font-style:normal;font-weight:800;color:var(--ink);font-size:12.5px;overflow-wrap:anywhere}
 
-/* Assistente: pulsante sempre presente in basso a destra e pannello chat. */
-.assistant-fab{position:fixed;right:22px;bottom:22px;z-index:60;display:inline-flex;align-items:center;gap:9px;border:0;border-radius:999px;padding:13px 19px;background:var(--navy);color:#fff;font-weight:800;box-shadow:0 12px 30px rgba(7,24,39,.3);transition:.16s ease}
-.assistant-fab:hover{transform:translateY(-2px);background:var(--navy-2)}
-.assistant-fab span{font-size:17px;line-height:1}
-.assistant-panel{position:fixed;right:22px;bottom:88px;z-index:61;width:min(430px,calc(100vw - 32px));max-height:min(660px,calc(100vh - 130px));display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
-.assistant-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:linear-gradient(120deg,var(--navy),var(--navy-2));color:#fff}
-.assistant-head strong{display:block;font-size:15px}
-.assistant-head span{display:block;color:#b9c7d2;font-size:11px;margin-top:2px}
-.assistant-head .icon-btn{background:rgba(255,255,255,.1);color:#fff;border:0;border-radius:9px;width:30px;height:30px;font-size:19px;line-height:1}
-.assistant-log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:#fbfcfe}
-.assistant-msg{max-width:92%;border-radius:14px;padding:11px 13px;font-size:13px;line-height:1.45}
-.assistant-msg.mia{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:5px}
-.assistant-msg.sua{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:5px}
-.assistant-msg.sua strong.numero{font-size:15px}
-.assistant-msg.errore{background:var(--critical-bg);border-color:#fecdca;color:var(--critical)}
-.assistant-read{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
-.assistant-read span{background:#f2f4f7;border:1px solid #eaecf0;color:#475467;border-radius:999px;padding:3px 8px;font-size:10.5px;font-weight:700}
-.assistant-read .fonte-ai{background:var(--purple-bg);border-color:#d9d6fe;color:var(--purple)}
-.assistant-warn{margin-top:8px;background:var(--watch-bg);border:1px solid #fedf89;color:#7a2e0e;border-radius:10px;padding:7px 9px;font-size:11.5px}
-.assistant-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
-.assistant-table th{text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:4px 6px;border-bottom:1px solid var(--line)}
-.assistant-table td{padding:5px 6px;border-bottom:1px solid #f1f3f7}
-.assistant-table td:last-child{text-align:right;font-weight:800}
-.assistant-show{margin-top:10px;border:1px solid #d0d5dd;background:#fff;color:#344054;border-radius:9px;padding:7px 11px;font-size:12px;font-weight:750}
-.assistant-show:hover{border-color:var(--accent);color:var(--accent)}
-.assistant-suggestions{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 10px;background:#fbfcfe}
-.assistant-suggestions button{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700}
-.assistant-suggestions button:hover{border-color:var(--accent);color:var(--accent)}
-.assistant-form{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--line);background:#fff}
-.assistant-form input{flex:1;border:1px solid #d0d5dd;border-radius:10px;padding:10px 12px;outline:0}
-.assistant-form input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(20,105,201,.12)}
-/* Il pulsante dell'assistente occupa l'angolo dove compariva il messaggio di
-   conferma: il messaggio sale sopra, e resta sopra anche al pannello aperto. */
-.toast{bottom:88px;z-index:62}
-@media (max-width:620px){.assistant-panel{right:8px;left:8px;width:auto;bottom:80px}.assistant-fab{right:12px;bottom:12px}.toast{bottom:76px;left:8px;right:8px;max-width:none}}
+/* ------------------------------------------------------------------ */
+/* Assistente: una chat, non un pannello di impostazioni.               */
+/* Le risposte del sistema non stanno in un fumetto: come negli          */
+/* assistenti a cui si e' abituati, il testo e' disteso e il fumetto     */
+/* resta solo a chi scrive. Cosi' la risposta si legge, non si decifra.  */
+.assistant-fab{position:fixed;right:24px;bottom:24px;z-index:60;width:58px;height:58px;display:grid;place-items:center;border:0;border-radius:50%;background:linear-gradient(140deg,#1a3a5c,#0b1f33);color:#fff;box-shadow:0 10px 30px rgba(7,24,39,.34),0 0 0 0 rgba(20,105,201,.5);transition:transform .22s cubic-bezier(.2,.9,.3,1.3),box-shadow .22s ease}
+.assistant-fab svg{width:25px;height:25px;fill:currentColor;position:absolute;transition:opacity .18s ease,transform .22s ease}
+.assistant-fab .fab-close{opacity:0;transform:rotate(-90deg) scale(.6)}
+.assistant-fab:hover{transform:translateY(-3px) scale(1.04);box-shadow:0 16px 36px rgba(7,24,39,.4)}
+.assistant-fab.aperto .fab-open{opacity:0;transform:rotate(90deg) scale(.6)}
+.assistant-fab.aperto .fab-close{opacity:1;transform:none}
+
+.assistant-panel{position:fixed;right:24px;bottom:96px;z-index:61;width:min(440px,calc(100vw - 32px));height:min(660px,calc(100vh - 140px));display:flex;flex-direction:column;background:var(--surface);border:1px solid #e9edf3;border-radius:22px;box-shadow:0 30px 70px rgba(16,24,40,.22),0 2px 8px rgba(16,24,40,.06);overflow:hidden;transform-origin:bottom right;animation:assistantIn .26s cubic-bezier(.2,.9,.3,1.1)}
+@keyframes assistantIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
+
+.assistant-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #eef1f6;background:#fff}
+.assistant-id{display:flex;align-items:center;gap:11px;min-width:0}
+.assistant-avatar{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(140deg,#1a3a5c,#0b1f33);color:#fff;flex:none}
+.assistant-avatar svg{width:19px;height:19px;fill:currentColor}
+.assistant-id strong{display:block;font-size:14.5px;letter-spacing:-.01em}
+.assistant-id span{display:block;font-size:11.5px;color:var(--muted);margin-top:1px}
+.assistant-tools{display:flex;gap:4px}
+.assistant-icon{width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:9px;background:transparent;color:var(--soft);transition:.15s ease}
+.assistant-icon svg{width:17px;height:17px}
+.assistant-icon:hover{background:#f2f4f7;color:var(--ink)}
+
+.assistant-log{flex:1;overflow-y:auto;padding:18px 18px 8px;display:flex;flex-direction:column;gap:18px;scroll-behavior:smooth}
+.assistant-log::-webkit-scrollbar{width:8px}
+.assistant-log::-webkit-scrollbar-thumb{background:#e3e8ef;border-radius:99px;border:2px solid #fff}
+
+/* Schermata iniziale: un saluto, non una lista di bottoni. */
+.assistant-hello{margin:auto;text-align:center;padding:20px 10px;animation:assistantFade .4s ease}
+.assistant-hello .hello-mark{width:52px;height:52px;margin:0 auto 14px;border-radius:17px;display:grid;place-items:center;background:linear-gradient(140deg,#1a3a5c,#0b1f33);color:#fff}
+.assistant-hello .hello-mark svg{width:26px;height:26px;fill:currentColor}
+.assistant-hello h3{margin:0 0 6px;font-size:16px;letter-spacing:-.02em}
+.assistant-hello p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.55;max-width:270px}
+
+.assistant-turn{display:flex;animation:assistantFade .28s ease}
+@keyframes assistantFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.assistant-turn.mia{justify-content:flex-end}
+.assistant-turn.mia .bolla{background:var(--accent);color:#fff;border-radius:18px 18px 5px 18px;padding:10px 14px;max-width:84%;font-size:13.5px;line-height:1.5;box-shadow:0 2px 8px rgba(20,105,201,.2)}
+.assistant-turn.sua{gap:11px}
+.assistant-turn.sua .mini-avatar{width:27px;height:27px;border-radius:9px;flex:none;margin-top:1px;display:grid;place-items:center;background:#f2f4f7;color:#475467}
+.assistant-turn.sua .mini-avatar svg{width:15px;height:15px;fill:currentColor}
+.assistant-turn.sua .bolla{font-size:13.5px;line-height:1.6;color:var(--ink);min-width:0;flex:1}
+.assistant-turn.errore .bolla{color:var(--critical)}
+
+.assistant-turn.sua .bolla .testo{white-space:pre-line}
+.assistant-warn{margin-top:10px;background:var(--watch-bg);border:1px solid #fedf89;color:#7a2e0e;border-radius:10px;padding:8px 10px;font-size:11.5px;line-height:1.45}
+
+.assistant-table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px;border:1px solid #eef1f6;border-radius:10px;overflow:hidden}
+.assistant-table th{text-align:left;background:#fafbfd;color:var(--muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;padding:7px 10px}
+.assistant-table td{padding:7px 10px;border-top:1px solid #f1f3f7}
+.assistant-table td:last-child,.assistant-table th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.assistant-table td:last-child{font-weight:800}
+
+.assistant-show{margin-top:12px;display:inline-flex;align-items:center;gap:7px;border:1px solid #dfe4ec;background:#fff;color:#344054;border-radius:10px;padding:8px 13px;font-size:12px;font-weight:720;transition:.15s ease}
+.assistant-show:hover{border-color:var(--accent);color:var(--accent);background:#f7fbff;transform:translateY(-1px)}
+
+.assistant-dots{display:inline-flex;gap:4px;padding:6px 0}
+.assistant-dots i{width:7px;height:7px;border-radius:50%;background:#c3cad6;animation:assistantBounce 1.15s infinite ease-in-out}
+.assistant-dots i:nth-child(2){animation-delay:.16s}
+.assistant-dots i:nth-child(3){animation-delay:.32s}
+@keyframes assistantBounce{0%,70%,100%{transform:translateY(0);opacity:.5}35%{transform:translateY(-5px);opacity:1}}
+
+.assistant-form{padding:12px 16px 16px;background:#fff}
+.assistant-field{display:flex;align-items:flex-end;gap:8px;border:1px solid #dfe4ec;background:#fff;border-radius:16px;padding:7px 7px 7px 14px;transition:.16s ease}
+.assistant-field:focus-within{border-color:#9cc3f0;box-shadow:0 0 0 4px rgba(20,105,201,.1)}
+.assistant-field textarea{flex:1;border:0;outline:0;resize:none;font-size:13.5px;line-height:1.5;padding:7px 0;max-height:120px;background:transparent;color:var(--ink);font-family:inherit}
+.assistant-field textarea::placeholder{color:#a3adbb}
+.assistant-send{width:34px;height:34px;flex:none;display:grid;place-items:center;border:0;border-radius:11px;background:var(--accent);color:#fff;transition:.15s ease}
+.assistant-send svg{width:17px;height:17px}
+.assistant-send:disabled{background:#e4e8ee;color:#aeb6c2;cursor:default}
+.assistant-send:not(:disabled):hover{background:var(--accent-2);transform:translateY(-1px)}
+
+/* Il pulsante occupa l'angolo del messaggio di conferma: il messaggio sale. */
+.toast{bottom:96px;z-index:62}
+@media (max-width:620px){
+  .assistant-panel{right:8px;left:8px;width:auto;bottom:88px;height:calc(100vh - 150px)}
+  .assistant-fab{right:14px;bottom:14px;width:52px;height:52px}
+  .toast{bottom:80px;left:8px;right:8px;max-width:none}
+}

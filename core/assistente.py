@@ -832,13 +832,13 @@ COLONNE_RIGA = (
 class Assistente:
     """Risponde a domande scritte, leggendo solo il database del monitor."""
 
-    def __init__(self, db: Any, durata_cache: int = 300, lettore_ai: Any = None):
+    def __init__(self, db: Any, durata_cache: int = 300, collaboratore: Any = None):
         self.db = db
         self.durata_cache = durata_cache
-        # Lettore opzionale: quando la frase e' troppo articolata per le regole
-        # qui sotto, la domanda viene passata a Claude, che pero' riempie
-        # questa stessa scheda di filtri. Le query non cambiano.
-        self.lettore_ai = lettore_ai
+        # Quando c'e', risponde lui: capisce la domanda, chiede al monitor i
+        # numeri e li racconta a parole sue. Le regole qui sotto restano la
+        # rete di sicurezza per quando non e' raggiungibile.
+        self.collaboratore = collaboratore
         self._vocabolario: Vocabolario | None = None
         self._vocabolario_at: float = 0.0
 
@@ -871,38 +871,27 @@ class Assistente:
         return self._vocabolario
 
     # -- ingresso ---------------------------------------------------------
-    def rispondi(self, domanda: str, oggi: date | None = None) -> dict[str, Any]:
+    def rispondi(self, domanda: str, oggi: date | None = None,
+                 storia: list[dict[str, str]] | None = None) -> dict[str, Any]:
         domanda = (domanda or "").strip()
         if not domanda:
             return self._vuoto("Scrivimi una domanda: per esempio «quante sono in giacenza adesso?».")
         if len(domanda) > 400:
             domanda = domanda[:400]
         oggi = oggi or datetime.now(ROME).date()
-        vocabolario = self.vocabolario()
-        lettura = interpreta(domanda, vocabolario, oggi)
+        # Prima il collega: e' lui che deve rispondere. Le regole intervengono
+        # solo se non e' raggiungibile, e in quel caso si vede dalla risposta.
+        if self.collaboratore is not None and self.collaboratore.configurato:
+            esito = self.collaboratore.conversa(domanda, storia or [], self, oggi)
+            if esito is not None:
+                esito["domanda"] = domanda
+                return esito
+        ripiego = self.collaboratore is not None and self.collaboratore.configurato
+        lettura = interpreta(domanda, self.vocabolario(), oggi)
         fonte = "regole"
-        avviso_ai = ""
-        if self.lettore_ai is not None and lettura_incerta(lettura):
-            letta, avviso_ai = self.lettore_ai.interpreta(domanda, vocabolario, oggi)
-            if letta is not None:
-                lettura, fonte = letta, "claude"
-            elif avviso_ai:
-                # Claude ha detto che con questi dati non si risponde: e' una
-                # risposta utile, molto piu' di un numero preso a caso.
-                return {
-                    "ok": True, "domanda": domanda, "risposta": avviso_ai,
-                    "numero": None, "righe": [], "totale_righe": 0,
-                    "interpretazione": {"chips": [], "non_capito": [], "fonte": "claude"},
-                    "suggerimenti": list(SUGGERIMENTI),
-                }
-        if lettura.intento == "dettaglio":
-            esito = self._dettaglio(lettura)
-        elif lettura.percorso:
-            esito = self._percorso(lettura)
-        elif lettura.intento == "raggruppa":
-            esito = self._raggruppa(lettura)
-        else:
-            esito = self._conta(lettura)
+        esito = self.calcola(lettura)
+        if ripiego:
+            esito["ripiego"] = True
         esito.update({
             "ok": True,
             "domanda": domanda,
@@ -918,6 +907,16 @@ class Assistente:
                                + ". Se cambiano la domanda, riscrivila in altro modo.")
         esito.setdefault("suggerimenti", [])
         return esito
+
+    def calcola(self, lettura: Lettura) -> dict[str, Any]:
+        """Esegue la lettura e restituisce i numeri, senza decidere le parole."""
+        if lettura.intento == "dettaglio":
+            return self._dettaglio(lettura)
+        if lettura.percorso:
+            return self._percorso(lettura)
+        if lettura.intento == "raggruppa":
+            return self._raggruppa(lettura)
+        return self._conta(lettura)
 
     @staticmethod
     def _vuoto(messaggio: str) -> dict[str, Any]:

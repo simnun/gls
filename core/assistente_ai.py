@@ -1,25 +1,21 @@
-"""Interpretazione della domanda affidata a Claude, quando serve davvero.
+"""Il collega che risponde alle domande sul monitor.
 
-Il motore locale (`core/assistente.py`) capisce le domande fatte con le parole
-del dominio, ma si ferma appena la frase si articola. Qui entra Claude, e fa
-una cosa sola: **leggere la domanda e riempire la stessa scheda di filtri** che
-riempirebbe il motore locale. I numeri continuano a uscire dal database, le
-query sono le stesse, l'elenco «mostrami quali» pure.
+Qui dentro non c'e' un traduttore di parole chiave: c'e' una conversazione.
+L'operatore scrive come parlerebbe a un collega, Claude capisce, va a prendere
+il dato e risponde a parole sue.
 
-E' la scelta piu' economica possibile, oltre che la piu' sicura:
+La regola che non cambia e' una sola, ed e' quella che rende il tutto
+affidabile: **Claude non puo' inventare un numero**. Non ha accesso al
+database; ha un solo strumento, `interroga_monitor`, con cui dichiara che cosa
+vuole contare. Il conteggio lo esegue il monitor e glielo restituisce. Claude
+mette le parole intorno a un numero che gli e' arrivato gia' fatto.
 
-- in uscita Claude scrive un oggetto JSON di poche righe, e l'uscita costa
-  cinque volte l'entrata: meno scrive, meno costa;
-- l'entrata (istruzioni + schema) e' sempre identica, quindi viene messa in
-  cache dal secondo messaggio in poi e costa un ventesimo;
-- il motore locale risponde da solo alle domande che gia' capisce, quindi
-  Claude viene chiamato solo quando serve;
-- se la chiave manca, il credito finisce o l'API non risponde, il sito
-  continua a funzionare con la lettura locale. Non si rompe niente.
+Un giro di domanda sono due chiamate: con la prima Claude dice che cosa
+serve, con la seconda scrive la risposta avendo il dato in mano. E' lo stesso
+che farebbe una persona: prima guarda, poi ti dice.
 
-Nulla di cio' che Claude scrive finisce in una query senza essere prima
-confrontato con i valori che esistono davvero nel database: un operatore
-inventato o una categoria inesistente vengono scartati, non cercati.
+Se la chiave manca, il credito finisce o l'API non risponde, il monitor torna
+alla lettura a regole e lo dichiara. Il sito non resta muto.
 """
 
 from __future__ import annotations
@@ -27,25 +23,21 @@ from __future__ import annotations
 import json
 import os
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from .assistente import (
-    ETICHETTE_CATEGORIA,
-    ETICHETTE_GRUPPO,
-    Lettura,
-    Periodo,
-    Vocabolario,
-)
+from .assistente import ETICHETTE_CATEGORIA, ETICHETTE_GRUPPO, Lettura, Periodo, Vocabolario
 from .timezones import ROME
 
 MODELLO_PREDEFINITO = "claude-opus-5-5"
-# L'uscita e' un oggetto JSON di poche righe: il tetto serve solo a impedire
-# che una risposta anomala costi molto. Resta largo per il ragionamento.
 MAX_TOKEN_USCITA = 1024
-# Prezzi per milione di token (entrata, uscita, lettura dalla cache), usati
-# solo per mostrare la spesa stimata: non cambiano il comportamento.
+MAX_GIRI = 3
+# Quante spedizioni di esempio accompagnano un conteggio: servono a far dire a
+# Claude "per esempio l'ordine #278004", non a fargli rifare i conti.
+MAX_ESEMPI = 6
+# Prezzi per milione di token (entrata, uscita, lettura dalla cache): servono
+# solo a mostrare la spesa stimata.
 PREZZI = {
     "claude-opus-5-5": (4.00, 20.00, 0.20),
     "claude-sonnet-5-5": (2.00, 10.00, 0.20),
@@ -57,14 +49,12 @@ GRUPPI_VALIDI = sorted(ETICHETTE_GRUPPO)
 RAGGRUPPAMENTI = ["", "provincia", "citta", "operatore", "stato", "categoria",
                   "giorno", "settimana", "mese"]
 
-# Lo schema viaggia a ogni domanda e si paga a peso, mentre le istruzioni di
-# sistema vengono lette dalla cache: qui restano solo i vincoli (i valori
-# ammessi), le spiegazioni stanno nelle istruzioni.
-SCHEMA = {
+# Lo schema viaggia a ogni domanda e si paga a peso: qui restano solo i
+# vincoli, cioe' i valori ammessi. Le spiegazioni stanno nelle istruzioni, che
+# sono identiche ogni volta e quindi vengono lette dalla cache.
+SCHEMA_STRUMENTO = {
     "type": "object",
     "properties": {
-        "fuori_portata": {"type": "boolean"},
-        "motivo": {"type": "string"},
         "soggetto": {"type": "string", "enum": ["SPEDIZIONI", "GIACENZE", "AZIONI", "SVINCOLI"]},
         "intento": {"type": "string", "enum": ["conta", "elenca", "raggruppa", "dettaglio"]},
         "percorso": {"type": "boolean"},
@@ -88,60 +78,59 @@ SCHEMA = {
         "ordine": {"type": "string"},
     },
     "required": [
-        "fuori_portata", "motivo", "soggetto", "intento", "percorso", "adesso",
-        "periodo_da", "periodo_a", "periodo_etichetta", "data_su", "categorie",
-        "gruppo", "gravita", "operatore", "provincia", "citta", "stato_gls",
-        "testo_libero", "solo_cod", "gestite", "raggruppa", "tracking", "ordine",
+        "soggetto", "intento", "percorso", "adesso", "periodo_da", "periodo_a",
+        "periodo_etichetta", "data_su", "categorie", "gruppo", "gravita",
+        "operatore", "provincia", "citta", "stato_gls", "testo_libero",
+        "solo_cod", "gestite", "raggruppa", "tracking", "ordine",
     ],
     "additionalProperties": False,
 }
 
-ISTRUZIONI = """Sei il traduttore di domande di un monitor di spedizioni GLS di un negozio online italiano.
+STRUMENTO = {
+    "name": "interroga_monitor",
+    "description": (
+        "Conta o elenca quello che c'e' nel monitor. Dichiara che cosa vuoi sapere e "
+        "ricevi i numeri calcolati sul database. Usalo ogni volta che la risposta "
+        "contiene anche un solo dato: non ci sono altri modi per saperlo."
+    ),
+    "strict": True,
+    "input_schema": SCHEMA_STRUMENTO,
+}
 
-Non devi rispondere alla domanda e non devi calcolare numeri: devi solo tradurre la domanda dell'operatore nei filtri con cui il monitor interroga il proprio database. I conteggi li fa il database.
+ISTRUZIONI = """Sei il collega che in questo negozio online segue le spedizioni GLS: giacenze, consegne mancate, rientri, svincoli. Conosci il lavoro e rispondi a chi te lo chiede dall'ufficio, in italiano, come si parla fra colleghi.
 
-Cosa contiene il monitor:
-- SPEDIZIONI: una riga per collo affidato a GLS, con l'ultimo stato GLS, una categoria, una gravita', la provincia e la citta' del destinatario, se e' in contrassegno, e la lavorazione interna.
-- GIACENZE: ogni volta che un collo si e' fermato in sede GLS in attesa di istruzioni. Ha una data di entrata, un esito (consegnata, rientrata, ripartita) e puo' essere ancora aperta.
-- AZIONI: quello che gli operatori registrano sulle pratiche (messaggio al cliente, telefonata, GLS contattato, nota).
-- SVINCOLI: le istruzioni di riconsegna inviate a GLS.
+Hai davanti il monitor delle spedizioni e un solo modo per leggerlo: lo strumento interroga_monitor. Tu non sai nulla a memoria.
 
-Come scegliere il soggetto:
-- "quante spedizioni...", "quante consegnate", "quanti rientri" -> SPEDIZIONI
-- "quante in giacenza", "quante sono andate in giacenza" -> GIACENZE
-- "quante ne ha gestite <nome>", "chi ha lavorato di piu'" -> AZIONI
-- "quanti svincoli abbiamo mandato" -> SVINCOLI
+REGOLA ASSOLUTA: non dire mai un numero che non ti sia stato restituito dallo strumento. Se per rispondere serve anche un solo dato, chiama lo strumento. Quando ti arrivano i numeri, riportali esattamente: non arrotondare, non sommare a mente, non stimare.
 
-Regole importanti:
-- Se la domanda riguarda la situazione di adesso ("quante sono in giacenza ora"), metti adesso=true e lascia il periodo vuoto.
-- Se la domanda ha un periodo, scrivi periodo_da e periodo_a come date AAAA-MM-GG, e periodo_etichetta come lo direbbe un italiano.
-- percorso=true solo quando si chiede che fine hanno fatto le giacenze (entrate, poi gestite, poi consegnate o rientrate).
-- data_su="ordine" solo se la domanda parla esplicitamente della data dell'ordine; altrimenti sempre "evento".
-- solo_cod=true solo per il metodo di pagamento in contrassegno. Se il problema e' l'importo del contrassegno, usa invece la categoria COD_ISSUE.
-- Usa operatore, provincia e citta' soltanto con i valori elencati qui sotto. Se il nome citato non c'e', lascia il campo vuoto.
-- Se la domanda non si puo' rispondere con questi dati (per esempio chiede il perche' di un andamento, o dati che il monitor non ha come i costi di spedizione), metti fuori_portata=true e spiega in una riga cosa manca. Non inventare un filtro pur di rispondere.
+Come rispondere:
+- Parla come una persona, non come un modulo. Due o tre frasi, al massimo, salvo che i dati chiedano di piu'.
+- Niente preamboli ("Certo", "Ecco a te"), niente elenchi dei filtri che hai usato, niente codici interni: si dice "in giacenza", non STORAGE; "consegnate", non DELIVERED.
+- Il numero va detto chiaro e subito, poi il contesto.
+- Se nei dati c'e' qualcosa che un collega farebbe notare (molte giacenze ancora non gestite, un numero molto diverso dal solito, una provincia che spicca), dillo in una riga. Senza allarmismi e senza inventare cause.
+- Se la domanda e' ambigua in un modo che cambia la risposta, chiedi la precisazione invece di tirare a indovinare.
+- Se il monitor non ha quel dato (per esempio i costi di spedizione, o il perche' di un andamento), dillo in una riga e spiega cosa manca. Non girarci intorno.
+- Se ti scrivono per salutare o per una cosa fuori tema, rispondi normalmente senza chiamare lo strumento.
 
-I campi da compilare:
-- fuori_portata, motivo: vedi la regola sopra; motivo e' stringa vuota quando la domanda e' rispondibile.
-- soggetto, intento: conta un numero, elenca le righe, raggruppa per una dimensione, dettaglio di una spedizione precisa.
-- percorso, adesso: vedi le regole sopra.
-- periodo_da, periodo_a: date AAAA-MM-GG, stringa vuota se la domanda non ha periodo. periodo_etichetta: come si chiama quel periodo in italiano.
-- data_su: "evento" (data dell'ultimo stato GLS) oppure "ordine" (data dell'ordine Shopify).
-- categorie: zero o piu' codici fra quelli elencati sotto. gruppo e gravita': una sola voce o stringa vuota.
-- operatore, provincia, citta': solo valori presenti negli elenchi qui sotto, altrimenti stringa vuota.
-- stato_gls: un pezzo del testo dello stato GLS da cercare. testo_libero: testo da cercare in ordine, cliente, stato o nota.
-- solo_cod: solo per il pagamento in contrassegno. gestite: "si" se il team e' gia' intervenuto, "no" se la pratica e' intatta, altrimenti stringa vuota.
-- raggruppa: la dimensione su cui dividere il conteggio, stringa vuota se non serve.
-- tracking, ordine: compilali solo se la domanda cita un numero preciso; ordine senza cancelletto.
+Come compilare interroga_monitor:
+- soggetto: SPEDIZIONI (i colli e il loro ultimo stato), GIACENZE (ogni volta che un collo si e' fermato in sede GLS in attesa di istruzioni, con data di entrata ed esito), AZIONI (quello che registrano gli operatori), SVINCOLI (le istruzioni di riconsegna mandate a GLS).
+- intento: conta un numero, elenca le righe, raggruppa per una dimensione, dettaglio di una spedizione precisa.
+- adesso=true per la situazione di questo momento; in quel caso lascia il periodo vuoto.
+- periodo_da e periodo_a sono date AAAA-MM-GG; periodo_etichetta e' come lo chiameresti parlando.
+- percorso=true solo per le domande su che fine hanno fatto le giacenze: entrate, gestite, poi consegnate o rientrate.
+- data_su="ordine" solo se la domanda parla della data dell'ordine; altrimenti "evento".
+- solo_cod riguarda il pagamento in contrassegno; se invece il problema e' l'importo, usa la categoria COD_ISSUE.
+- operatore, provincia e citta': soltanto valori presenti negli elenchi qui sotto, altrimenti lascia vuoto.
+- gestite: "si" se il team e' gia' intervenuto, "no" se la pratica e' intatta.
+- Lascia vuoto tutto cio' che la domanda non chiede: ogni filtro in piu' e' una risposta piu' stretta del dovuto.
 
-Rispondi solo con l'oggetto JSON richiesto."""
+Nei risultati non ci sono i dati personali dei clienti: nome, email, telefono e indirizzo restano sul monitor e non ti vengono passati. Se servono, di' all'operatore di aprire l'elenco."""
 
 
 @dataclass
 class Consumo:
-    """Quanto e' costato finora, per poterlo mostrare e per fermarsi in tempo."""
-
     chiamate: int = 0
+    conversazioni: int = 0
     token_entrata: int = 0
     token_cache: int = 0
     token_uscita: int = 0
@@ -150,23 +139,18 @@ class Consumo:
 
     def costo(self, modello: str) -> float:
         entrata, uscita, cache = PREZZI.get(modello, PREZZI[MODELLO_PREDEFINITO])
-        return (
-            self.token_entrata * entrata / 1_000_000
-            + self.token_cache * cache / 1_000_000
-            + self.token_uscita * uscita / 1_000_000
-        )
+        return (self.token_entrata * entrata / 1_000_000
+                + self.token_cache * cache / 1_000_000
+                + self.token_uscita * uscita / 1_000_000)
 
 
-class LettoreAI:
-    """Fa leggere la domanda a Claude e restituisce una `Lettura` verificata."""
+class Collaboratore:
+    """Tiene la conversazione e lascia i conti al monitor."""
 
-    def __init__(
-        self,
-        api_key: str | None = None,
-        modello: str | None = None,
-        max_al_giorno: int = 0,
-    ):
-        self.api_key = (api_key if api_key is not None else os.environ.get("ANTHROPIC_API_KEY", "")).strip()
+    def __init__(self, api_key: str | None = None, modello: str | None = None,
+                 max_al_giorno: int = 0):
+        self.api_key = (api_key if api_key is not None
+                        else os.environ.get("ANTHROPIC_API_KEY", "")).strip()
         self.modello = (modello or os.environ.get("ASSISTENTE_MODELLO") or MODELLO_PREDEFINITO).strip()
         if max_al_giorno:
             self.max_al_giorno = max_al_giorno
@@ -180,20 +164,15 @@ class LettoreAI:
         self._lock = threading.Lock()
         self.ultimo_errore = ""
 
-    # -- stato ------------------------------------------------------------
     @property
     def configurato(self) -> bool:
         return bool(self.api_key)
-
-    def _entro_il_tetto(self, oggi: date) -> bool:
-        if self.consumo.giorno != oggi.isoformat():
-            self.consumo = Consumo(giorno=oggi.isoformat())
-        return self.consumo.chiamate < self.max_al_giorno
 
     def stato(self) -> dict[str, Any]:
         return {
             "attivo": self.configurato,
             "modello": self.modello,
+            "conversazioni_oggi": self.consumo.conversazioni,
             "chiamate_oggi": self.consumo.chiamate,
             "tetto_giornaliero": self.max_al_giorno,
             "costo_stimato_oggi": round(self.consumo.costo(self.modello), 4),
@@ -201,104 +180,123 @@ class LettoreAI:
             "ultimo_errore": self.ultimo_errore[:200],
         }
 
-    # -- cliente ----------------------------------------------------------
-    def _ottieni_cliente(self) -> Any:
-        """Importa l'SDK solo alla prima domanda che lo richiede.
+    def _entro_il_tetto(self, oggi: date) -> bool:
+        if self.consumo.giorno != oggi.isoformat():
+            self.consumo = Consumo(giorno=oggi.isoformat())
+        return self.consumo.conversazioni < self.max_al_giorno
 
-        Su un servizio con 512 MB di memoria conta: se nessuno usa
-        l'assistente, la libreria non viene nemmeno caricata.
-        """
+    def _ottieni_cliente(self) -> Any:
+        """L'SDK viene importato alla prima domanda, non all'avvio del sito."""
         if self._cliente is not None:
             return self._cliente
         with self._lock:
             if self._cliente is None:
                 import anthropic
 
-                self._cliente = anthropic.Anthropic(api_key=self.api_key, max_retries=1, timeout=25.0)
+                self._cliente = anthropic.Anthropic(api_key=self.api_key, max_retries=1, timeout=40.0)
         return self._cliente
 
-    # -- lettura ----------------------------------------------------------
-    def interpreta(
+    # -- conversazione ----------------------------------------------------
+    def conversa(
         self,
         domanda: str,
-        vocabolario: Vocabolario,
+        storia: list[dict[str, str]],
+        assistente: Any,
         oggi: date | None = None,
-    ) -> tuple[Lettura | None, str]:
-        """Ritorna la lettura di Claude e un eventuale messaggio da mostrare."""
+    ) -> dict[str, Any] | None:
+        """Porta avanti il botta e risposta. None se non si e' potuto fare."""
         oggi = oggi or datetime.now(ROME).date()
-        if not self.configurato:
-            return None, ""
-        if not self._entro_il_tetto(oggi):
-            return None, "Ho raggiunto il tetto di domande complesse per oggi."
+        if not self.configurato or not self._entro_il_tetto(oggi):
+            return None
         try:
             cliente = self._ottieni_cliente()
-        except Exception as exc:  # libreria assente o chiave malformata
-            self.ultimo_errore = f"{type(exc).__name__}: {exc}"
-            self.consumo.errori += 1
-            return None, ""
-
-        istruzioni = self._istruzioni(vocabolario, oggi)
-        try:
-            risposta = cliente.messages.create(
-                model=self.modello,
-                max_tokens=MAX_TOKEN_USCITA,
-                # Le istruzioni non cambiano mai: dalla seconda domanda in poi
-                # vengono lette dalla cache e costano un ventesimo.
-                system=[{"type": "text", "text": istruzioni,
-                         "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": domanda[:400]}],
-                # Tradurre una frase in filtri non richiede ragionamento
-                # profondo: l'uscita e' la voce cara, e qui va tenuta corta.
-                output_config={"effort": "low",
-                               "format": {"type": "json_schema", "schema": SCHEMA}},
-            )
         except Exception as exc:
             self.ultimo_errore = f"{type(exc).__name__}: {exc}"
             self.consumo.errori += 1
-            return None, ""
+            return None
 
-        self._registra(risposta)
-        if getattr(risposta, "stop_reason", "") == "refusal":
-            return None, ""
-        testo = next((b.text for b in risposta.content if getattr(b, "type", "") == "text"), "")
-        if not testo:
-            return None, ""
-        try:
-            dati = json.loads(testo)
-        except json.JSONDecodeError:
-            self.consumo.errori += 1
-            return None, ""
-        if dati.get("fuori_portata"):
-            return None, (dati.get("motivo") or "").strip()
-        return costruisci_lettura(dati, vocabolario, oggi), ""
+        vocabolario = assistente.vocabolario()
+        messaggi = _storia_pulita(storia) + [{"role": "user", "content": domanda[:400]}]
+        istruzioni = self._istruzioni(vocabolario, oggi)
+        self.consumo.conversazioni += 1
+
+        ultimo_calcolo: dict[str, Any] | None = None
+        for _ in range(MAX_GIRI):
+            try:
+                risposta = cliente.messages.create(
+                    model=self.modello,
+                    max_tokens=MAX_TOKEN_USCITA,
+                    system=[{"type": "text", "text": istruzioni,
+                             "cache_control": {"type": "ephemeral"}}],
+                    tools=[STRUMENTO],
+                    messages=messaggi,
+                    output_config={"effort": "low"},
+                )
+            except Exception as exc:
+                self.ultimo_errore = f"{type(exc).__name__}: {exc}"
+                self.consumo.errori += 1
+                return None
+            self._registra(risposta)
+            if getattr(risposta, "stop_reason", "") == "refusal":
+                return None
+            if risposta.stop_reason != "tool_use":
+                return self._confeziona(risposta, ultimo_calcolo)
+
+            messaggi.append({"role": "assistant", "content": risposta.content})
+            esiti = []
+            for blocco in risposta.content:
+                if getattr(blocco, "type", "") != "tool_use":
+                    continue
+                lettura = costruisci_lettura(blocco.input or {}, vocabolario, oggi)
+                try:
+                    calcolo = assistente.calcola(lettura)
+                except Exception as exc:
+                    self.ultimo_errore = f"{type(exc).__name__}: {exc}"
+                    esiti.append({"type": "tool_result", "tool_use_id": blocco.id,
+                                  "is_error": True,
+                                  "content": "Il monitor non e' riuscito a eseguire la ricerca."})
+                    continue
+                ultimo_calcolo = calcolo
+                esiti.append({"type": "tool_result", "tool_use_id": blocco.id,
+                              "content": json.dumps(_risultato(calcolo, lettura), ensure_ascii=False)})
+            messaggi.append({"role": "user", "content": esiti})
+
+        # Troppi giri: meglio dirlo che restare in silenzio.
+        return None
+
+    def _confeziona(self, risposta: Any, calcolo: dict[str, Any] | None) -> dict[str, Any]:
+        testo = "\n\n".join(b.text.strip() for b in risposta.content
+                            if getattr(b, "type", "") == "text" and b.text.strip())
+        calcolo = calcolo or {}
+        return {
+            "ok": True,
+            "risposta": testo or "Non sono riuscito a formulare la risposta.",
+            "numero": calcolo.get("numero"),
+            "righe": calcolo.get("righe", []),
+            "totale_righe": calcolo.get("totale_righe", 0),
+            "tabella": calcolo.get("tabella"),
+            "dettagli": calcolo.get("dettagli"),
+            "fonte": "claude",
+        }
 
     def _registra(self, risposta: Any) -> None:
-        uso = getattr(risposta, "usage", None)
         self.consumo.chiamate += 1
+        uso = getattr(risposta, "usage", None)
         if not uso:
             return
         self.consumo.token_entrata += int(getattr(uso, "input_tokens", 0) or 0)
+        self.consumo.token_entrata += int(getattr(uso, "cache_creation_input_tokens", 0) or 0)
         self.consumo.token_uscita += int(getattr(uso, "output_tokens", 0) or 0)
         self.consumo.token_cache += int(getattr(uso, "cache_read_input_tokens", 0) or 0)
-        # La scrittura in cache costa un quarto in piu' della prima lettura:
-        # va contata con l'entrata, non con la cache.
-        self.consumo.token_entrata += int(getattr(uso, "cache_creation_input_tokens", 0) or 0)
 
     def _istruzioni(self, vocabolario: Vocabolario, oggi: date) -> str:
-        """Le istruzioni cambiano solo quando cambia il vocabolario.
-
-        Restano in testa al messaggio e identiche fra una domanda e l'altra:
-        e' questa stabilita' che le fa costare quasi niente dalla seconda in
-        poi. La data entra qui perche' serve a interpretare "ieri", e cambia
-        una volta al giorno: la cache si rinnova all'alba, non a ogni domanda.
-        """
         pezzi = [ISTRUZIONI, "", f"Oggi e' {oggi.isoformat()} ({_giorno_italiano(oggi)})."]
         if vocabolario.operatori:
-            pezzi.append("Operatori esistenti: " + ", ".join(sorted(vocabolario.operatori)) + ".")
+            pezzi.append("Operatori: " + ", ".join(sorted(vocabolario.operatori)) + ".")
         if vocabolario.province:
             pezzi.append("Province presenti: " + ", ".join(sorted(vocabolario.province)) + ".")
-        pezzi.append("Categorie disponibili: " + ", ".join(
-            f"{codice} ({ETICHETTE_CATEGORIA[codice]})" for codice in CATEGORIE_VALIDE) + ".")
+        pezzi.append("Categorie: " + ", ".join(
+            f"{c} ({ETICHETTE_CATEGORIA[c]})" for c in CATEGORIE_VALIDE) + ".")
         return "\n".join(pezzi)
 
 
@@ -309,13 +307,82 @@ def _giorno_italiano(giorno: date) -> str:
     return GIORNI[giorno.weekday()]
 
 
-def costruisci_lettura(dati: dict[str, Any], vocabolario: Vocabolario, oggi: date) -> Lettura:
-    """Trasforma il JSON in una `Lettura`, scartando cio' che non esiste.
+def _storia_pulita(storia: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """Gli ultimi scambi, come solo testo.
 
-    Lo schema obbliga Claude a scegliere fra valori previsti per categorie,
-    gruppi e raggruppamenti, ma nomi di persone e di citta' restano testo
-    libero: vengono accettati solo se corrispondono a un valore presente nel
-    database. Meglio un filtro in meno che un filtro inventato.
+    Bastano a reggere un "e ieri?" senza trascinarsi dietro i risultati degli
+    strumenti dei giri precedenti, che costerebbero e non servono.
+    """
+    messaggi: list[dict[str, str]] = []
+    for voce in (storia or [])[-8:]:
+        ruolo = "assistant" if str(voce.get("ruolo")) == "assistente" else "user"
+        testo = str(voce.get("testo") or "").strip()[:600]
+        if testo:
+            messaggi.append({"role": ruolo, "content": testo})
+    while messaggi and messaggi[0]["role"] != "user":
+        messaggi.pop(0)
+    return messaggi
+
+
+def _risultato(calcolo: dict[str, Any], lettura: Lettura) -> dict[str, Any]:
+    """Quello che torna a Claude: numeri e stati, mai dati dei clienti."""
+    fuori: dict[str, Any] = {
+        "conteggio": calcolo.get("numero"),
+        "totale_trovate": calcolo.get("totale_righe", 0),
+        "ho_cercato": _riassunto_filtri(lettura),
+    }
+    if calcolo.get("dettagli"):
+        fuori["dettagli"] = calcolo["dettagli"]
+    tabella = calcolo.get("tabella")
+    if tabella and tabella.get("righe"):
+        fuori["ripartizione"] = {
+            "per": tabella.get("titolo"),
+            "voci": [[str(r[0]), r[1]] for r in tabella["righe"][:25]],
+        }
+    esempi = []
+    for riga in (calcolo.get("righe") or [])[:MAX_ESEMPI]:
+        esempi.append({
+            "ordine": riga.get("order_name"),
+            "tracking": riga.get("tracking_number"),
+            "dove": " ".join(x for x in (riga.get("city"), riga.get("province")) if x),
+            "stato": riga.get("gls_status"),
+            "quando": str(riga.get("gls_event_at") or "")[:10],
+            "lavorazione": riga.get("workflow_status"),
+            "operatore": riga.get("last_operator_name") or "",
+        })
+    if esempi:
+        fuori["esempi"] = esempi
+    return fuori
+
+
+def _riassunto_filtri(lettura: Lettura) -> dict[str, Any]:
+    nomi = {"SPEDIZIONI": "spedizioni", "GIACENZE": "giacenze",
+            "AZIONI": "azioni degli operatori", "SVINCOLI": "svincoli"}
+    riassunto: dict[str, Any] = {"cosa": nomi.get(lettura.soggetto, lettura.soggetto)}
+    if lettura.periodo:
+        riassunto["quando"] = lettura.periodo.etichetta
+    elif lettura.adesso:
+        riassunto["quando"] = "adesso"
+    if lettura.categorie:
+        riassunto["categorie"] = [ETICHETTE_CATEGORIA.get(c, c) for c in lettura.categorie]
+    if lettura.gruppo:
+        riassunto["stato_pratica"] = ETICHETTE_GRUPPO.get(lettura.gruppo, lettura.gruppo)
+    for campo in ("operatore", "provincia", "citta", "stato_gls", "gestite"):
+        valore = getattr(lettura, campo)
+        if valore:
+            riassunto[campo] = valore
+    if lettura.solo_cod:
+        riassunto["pagamento"] = "contrassegno"
+    return riassunto
+
+
+def costruisci_lettura(dati: dict[str, Any], vocabolario: Vocabolario, oggi: date) -> Lettura:
+    """Dal JSON dello strumento ai filtri, scartando cio' che non esiste.
+
+    Lo schema vincola Claude ai valori previsti per categorie, gruppi e
+    raggruppamenti, ma nomi di persone e di citta' restano testo libero:
+    vengono accettati solo se corrispondono a un valore presente nel database.
+    Meglio un filtro in meno che un filtro inventato.
     """
     lettura = Lettura()
     lettura.soggetto = _scelta(dati.get("soggetto"), ("SPEDIZIONI", "GIACENZE", "AZIONI", "SVINCOLI"), "SPEDIZIONI")
@@ -336,16 +403,13 @@ def costruisci_lettura(dati: dict[str, Any], vocabolario: Vocabolario, oggi: dat
 
     nome = str(dati.get("operatore") or "").strip()
     if nome:
-        lettura.operatore = next(
-            (o for o in vocabolario.operatori if o.lower() == nome.lower()), "")
+        lettura.operatore = next((o for o in vocabolario.operatori if o.lower() == nome.lower()), "")
     sigla = str(dati.get("provincia") or "").strip()
     if sigla:
-        lettura.provincia = next(
-            (p for p in vocabolario.province if p.lower() == sigla.lower()), "")
+        lettura.provincia = next((p for p in vocabolario.province if p.lower() == sigla.lower()), "")
     citta = str(dati.get("citta") or "").strip()
     if citta:
-        lettura.citta = next(
-            (c for c in vocabolario.citta if c.lower() == citta.lower()), "")
+        lettura.citta = next((c for c in vocabolario.citta if c.lower() == citta.lower()), "")
 
     lettura.periodo = _periodo(dati, oggi)
     if lettura.intento == "raggruppa" and not lettura.raggruppa:
@@ -377,8 +441,6 @@ def _periodo(dati: dict[str, Any], oggi: date) -> Periodo | None:
     fine = fine or inizio
     if inizio > fine:
         inizio, fine = fine, inizio
-    # Un periodo che comincia prima del monitor o finisce nel futuro e' un
-    # errore di lettura, non una domanda: meglio nessun filtro che uno storto.
     if inizio.year < 2020 or (inizio - oggi).days > 1:
         return None
     if fine > oggi:

@@ -27,8 +27,11 @@ class V29NoEventsCaseTests(unittest.TestCase):
             'order_gid': 'gid://shopify/Order/123',
             'order_legacy_id': '123',
             'order_name': '#276999',
-            'order_created_at': (datetime.now(timezone.utc)-timedelta(days=4)).isoformat(),
-            'fulfillment_created_at': (datetime.now(timezone.utc)-timedelta(days=3)).isoformat(),
+            # Abbastanza vecchia da essere ferma anche contando solo i giorni
+            # lavorativi: con tre giorni il test falliva ogni lunedi', perche'
+            # il fine settimana non conta e la regola non era ancora scattata.
+            'order_created_at': (datetime.now(timezone.utc)-timedelta(days=12)).isoformat(),
+            'fulfillment_created_at': (datetime.now(timezone.utc)-timedelta(days=11)).isoformat(),
             'customer_gid': 'gid://shopify/Customer/55',
             'customer_legacy_id': '55',
             'customer_name': 'Cliente Test',
