@@ -1436,19 +1436,33 @@ class Database:
     def apply_shipment_classification(
         self, tracking_number: str, severity: str, category: str,
         reason: str, recommended_action: str, closed: bool,
+        evento: dict[str, Any] | None = None,
     ) -> None:
         """Aggiorna la classificazione di una spedizione senza toccare altro.
 
         Lavoro dell'operatore, note e stato pratica restano come sono: qui si
         riscrive solo come il monitor legge lo stato GLS.
+
+        Con `evento` si allinea anche il testo mostrato in elenco. Serve quando
+        la spedizione viene descritta da un evento che non e' l'ultimo: senza,
+        una pratica classificata come rientro continuerebbe a mostrare a
+        schermo la scansione successiva, per esempio "disponibile per il
+        ritiro", e chi legge non capirebbe perche' e' fra i rientrati.
         """
+        campi = ["severity=?", "category=?", "reason=?", "recommended_action=?", "closed=?"]
+        valori: list[Any] = [severity, category, reason, recommended_action, 1 if closed else 0]
+        if evento:
+            campi += ["gls_status=?", "gls_note=?", "gls_event_at=?", "gls_code=?", "gls_location=?"]
+            valori += [
+                evento.get("state") or "", evento.get("note") or "",
+                evento.get("event_at"), evento.get("code") or "",
+                evento.get("location") or "",
+            ]
+        valori.append(tracking_number)
         with self.connect() as conn:
             conn.execute(
-                """UPDATE shipments
-                   SET severity=?, category=?, reason=?, recommended_action=?, closed=?
-                   WHERE tracking_number=?""",
-                (severity, category, reason, recommended_action, 1 if closed else 0,
-                 tracking_number),
+                "UPDATE shipments SET " + ", ".join(campi) + " WHERE tracking_number=?",
+                tuple(valori),
             )
 
     def reconcile_stock_cases(self, tracking_number: str) -> None:

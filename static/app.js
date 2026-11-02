@@ -1329,6 +1329,37 @@ function clearQueueFilters() {
   const gls = $('#glsStateFilter'); if (gls) gls.value = '';
 }
 
+// Riapplica le regole di oggi a tutto lo storico e chiude le pratiche che non
+// hanno piu' seguito. Non interroga GLS e non tocca il lavoro degli operatori:
+// rilegge quello che c'e' gia' e ne trae le conseguenze. Serve dopo un cambio
+// di regole, perche' gli eventi conservano la classificazione del giorno in
+// cui sono stati letti.
+async function sistemaArchivio() {
+  const conferma = window.confirm(
+    'Rileggo tutto l\u2019archivio con le regole di oggi e chiudo le pratiche senza piu\u2019 '
+    + 'seguito (ordine annullato, esito gia\u2019 dichiarato).\n\n'
+    + 'Non viene interrogato GLS e il lavoro registrato dagli operatori resta. Procedo?');
+  if (!conferma) return;
+  const voce = $('#manutenzioneBtn');
+  if (voce) { voce.disabled = true; voce.textContent = 'Sto sistemando\u2026'; }
+  try {
+    const riclassifica = await api('/api/maintenance/reclassify', {method: 'POST', body: '{}'});
+    const riparazioni = await api('/api/maintenance/ripristina-lavorazioni', {method: 'POST', body: '{}'});
+    const pezzi = [];
+    if (riclassifica.spedizioni_aggiornate) pezzi.push(`${riclassifica.spedizioni_aggiornate} spedizioni riclassificate`);
+    if (riparazioni.ordini_annullati_chiusi) pezzi.push(`${riparazioni.ordini_annullati_chiusi} con ordine annullato chiuse`);
+    if (riparazioni.pratiche_concluse) pezzi.push(`${riparazioni.pratiche_concluse} pratiche concluse`);
+    if (riparazioni.ripristinate) pezzi.push(`${riparazioni.ripristinate} lavorazioni ripristinate`);
+    showToast(pezzi.length ? `Archivio sistemato: ${pezzi.join(' · ')}` : 'Archivio gia\u2019 in ordine: niente da sistemare');
+    state.analisi = null;
+    await loadDashboard({quiet: true});
+  } catch (err) {
+    showToast(`Non sono riuscito a sistemare l\u2019archivio: ${err.message}`, true);
+  } finally {
+    if (voce) { voce.disabled = false; voce.textContent = 'Sistema l\u2019archivio'; }
+  }
+}
+
 function impostaMenuImpostazioni() {
   // Stati nuovi e Regole servono di rado: stanno nell'ingranaggio, non fra le
   // code di lavoro quotidiane.
@@ -1349,8 +1380,10 @@ function impostaMenuImpostazioni() {
   pannello.addEventListener('click', (ev) => ev.stopPropagation());
   $$('.settings-item').forEach(voce => voce.addEventListener('click', () => {
     chiudi();
-    switchView(voce.dataset.view);
+    if (voce.dataset.view) switchView(voce.dataset.view);
   }));
+  const manutenzione = $('#manutenzioneBtn');
+  if (manutenzione) manutenzione.addEventListener('click', sistemaArchivio);
   document.addEventListener('click', chiudi);
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') chiudi(); });
 }

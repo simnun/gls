@@ -546,7 +546,8 @@ class SyncEngine:
             classe = dati["classe"]
             self.db.apply_shipment_classification(
                 tracking, classe.severity, classe.category, classe.reason,
-                classe.recommended_action, classe.category in {"DELIVERED", "RETURN"},
+                classe.recommended_action, classe.category in CATEGORIE_TERMINALI,
+                evento=dati["evento"],
             )
             self.db.reconcile_stock_cases(tracking)
             self.db.reconcile_inconsistencies(tracking)

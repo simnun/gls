@@ -106,6 +106,10 @@ class EsitoDefinitivoTests(unittest.TestCase):
         riga = self.spedizione()
         self.assertEqual(riga["category"], "RETURN")
         self.assertTrue(riga["closed"])
+        # A schermo deve comparire l'evento che descrive la pratica, non la
+        # scansione del reso che gli e' arrivata dopo.
+        self.assertIn("restituito", riga["gls_status"])
+        self.assertTrue(riga["gls_event_at"].startswith("2026-10-09"))
 
 
 if __name__ == "__main__":
