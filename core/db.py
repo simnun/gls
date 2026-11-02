@@ -463,6 +463,25 @@ class Database:
             result["error_samples"] = [dict(x) for x in samples]
             return result
 
+    def durate_sync(self, quante: int = 10) -> list[dict[str, Any]]:
+        """Quanto e' durata ogni sincronizzazione recente, in secondi."""
+        fuori: list[dict[str, Any]] = []
+        with self.connect() as conn:
+            righe = conn.execute(
+                "SELECT started_at, finished_at, status, tracking_numbers, gls_errors"
+                " FROM sync_runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
+                (max(1, quante),),
+            ).fetchall()
+        for riga in righe:
+            inizio, fine = self._parse_dt(riga["started_at"]), self._parse_dt(riga["finished_at"])
+            fuori.append({
+                "quando": riga["finished_at"],
+                "secondi": round((fine - inizio).total_seconds(), 1) if inizio and fine else None,
+                "tracking": int(riga["tracking_numbers"] or 0),
+                "stato": riga["status"],
+            })
+        return fuori
+
     def tracking_state_map(self) -> dict[str, dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -1216,8 +1235,8 @@ class Database:
                 "pending_actions": pending_actions,
                 "inconsistency_count": sum(1 for x in shipments if x.get("has_inconsistency")),
                 "total_active": sum(1 for x in shipments if not x.get("closed")),
-                "mese": self.confronto_mensile(),
-                "serie": self.serie_giornaliera(),
+                "giacenze_totali": int((conn.execute(
+                    "SELECT COUNT(*) FROM stock_cases").fetchone() or [0])[0] or 0),
                 "last_sync": self.latest_sync(),
             }
 
@@ -1882,8 +1901,14 @@ class Database:
             return [dict(r) for r in rows]
 
     def stock_history(self) -> dict[str, Any]:
-        # Come sopra: la ricostruzione delle giacenze avviene durante la
-        # sincronizzazione, non a ogni apertura dello storico.
+        """Tutte le giacenze con gli svincoli e le azioni che le riguardano.
+
+        Svincoli e azioni si leggono in due query sole e si accoppiano qui.
+        Prima se ne facevano due per ogni giacenza: con qualche centinaio di
+        pratiche diventavano quasi mille interrogazioni, ripetute a ogni
+        aggiornamento della pagina, sullo stesso database su cui sta
+        scrivendo la sincronizzazione.
+        """
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -1896,36 +1921,30 @@ class Database:
                 ORDER BY COALESCE(sc.entered_at, sc.created_at) DESC, sc.id DESC
                 """
             ).fetchall()
+            svincoli: dict[Any, list[dict[str, Any]]] = {}
+            for riga in conn.execute(
+                "SELECT * FROM gls_release_requests ORDER BY created_at DESC, id DESC"
+            ).fetchall():
+                svincoli.setdefault(riga["stock_case_id"], []).append(dict(riga))
+            azioni: dict[str, list[dict[str, Any]]] = {}
+            for riga in conn.execute(
+                "SELECT * FROM operator_actions ORDER BY created_at DESC, id DESC"
+            ).fetchall():
+                azioni.setdefault(riga["tracking_number"], []).append(dict(riga))
+
             cases: list[dict[str, Any]] = []
             summary = {"total": 0, "open": 0, "handled": 0, "delivered": 0, "returned": 0, "other": 0}
             for row in rows:
                 item = dict(row)
-                releases = conn.execute(
-                    "SELECT * FROM gls_release_requests WHERE stock_case_id=? ORDER BY created_at DESC, id DESC",
-                    (item["id"],),
-                ).fetchall()
-                release_list = [dict(r) for r in releases]
+                release_list = svincoli.get(item["id"], [])
                 start = item.get("entered_at") or item.get("created_at")
                 end = item.get("exited_at")
-                if end:
-                    actions = conn.execute(
-                        """
-                        SELECT * FROM operator_actions
-                        WHERE tracking_number=? AND created_at>=? AND created_at<=?
-                        ORDER BY created_at DESC, id DESC
-                        """,
-                        (item["tracking_number"], start, end),
-                    ).fetchall()
-                else:
-                    actions = conn.execute(
-                        """
-                        SELECT * FROM operator_actions
-                        WHERE tracking_number=? AND created_at>=?
-                        ORDER BY created_at DESC, id DESC
-                        """,
-                        (item["tracking_number"], start),
-                    ).fetchall()
-                action_list = [dict(a) for a in actions]
+                # Stessa finestra di prima: dall'entrata in giacenza all'uscita,
+                # o fino a oggi se la giacenza e' ancora aperta.
+                action_list = [
+                    a for a in azioni.get(item["tracking_number"], [])
+                    if a["created_at"] >= start and (not end or a["created_at"] <= end)
+                ]
                 item["release_requests"] = release_list
                 item["operator_actions"] = action_list
                 item["handled"] = bool(release_list or action_list)

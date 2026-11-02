@@ -98,6 +98,14 @@ def _versione_online() -> str:
     return ""
 
 
+def _durate_sync() -> list:
+    """Le ultime sincronizzazioni con la loro durata, per vedere se rallentano."""
+    try:
+        return DB.durate_sync(8)
+    except Exception:
+        return []
+
+
 def _momento_build() -> str:
     """Quando e' stata messa online questa versione, in ora italiana.
 
@@ -325,6 +333,12 @@ class AppHandler(BaseHTTPRequestHandler):
 
         if path == "/api/stocks":
             return self._json(DB.stock_history())
+
+        if path == "/api/analisi":
+            # Calcolate solo quando qualcuno apre il pannello: prima pesavano
+            # su ogni caricamento della dashboard, cioe' ogni trenta secondi
+            # per ogni scheda aperta.
+            return self._json({"mese": DB.confronto_mensile(), "serie": DB.serie_giornaliera()})
 
         if path.startswith("/api/stock-case/"):
             try:
@@ -692,6 +706,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "serverless": CONFIG.serverless,
             "storage": "postgres" if CONFIG.uses_postgres else "sqlite",
             "assistente": COLLABORATORE.stato(),
+            "sincronizzazioni": _durate_sync(),
             "configurato": {
                 "database_url": bool(CONFIG.database_url),
                 "operatori": len(CONFIG.dashboard_users),

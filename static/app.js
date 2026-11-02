@@ -21,6 +21,9 @@ const state = {
   stockDateTo: '',
   sortKey: 'priority',
   sortDir: 'desc',
+  // Riempito solo quando si apre il pannello delle analisi.
+  analisi: null,
+  giacenzeCaricate: false,
   stockSortKey: 'entered',
   stockSortDir: 'desc',
   // Spedizioni dietro all'ultima risposta dell'assistente: la vista le mostra
@@ -372,6 +375,14 @@ function stockOutcomeBadge(item) {
   return `<span class="stock-outcome ${cls[key] || 'neutral'}">${esc(labels[key] || key)}</span>`;
 }
 
+// Lo storico giacenze si ricarica solo se e' quello che si sta guardando.
+// Quando il tab si riapre viene comunque richiesto da capo, quindi non si
+// rischia di mostrare dati vecchi; si evita solo di scaricarli per niente.
+async function aggiornaGiacenzeSeVisibili() {
+  if (state.view === 'stocks') return loadStockHistory({quiet: true});
+  state.giacenzeCaricate = false;
+}
+
 async function loadStockHistory({quiet = false} = {}) {
   try {
     state.stockData = await api('/api/stocks');
@@ -428,6 +439,7 @@ function renderStockHistory() {
   $('#stockDelivered').textContent = summary.delivered || 0;
   $('#stockReturned').textContent = summary.returned || 0;
   $('#tabStockCount').textContent = summary.total || 0;
+  state.giacenzeCaricate = true;
   $('#stockMeta').textContent = `${rows.length} casi nella vista · ${summary.total || 0} giacenze storiche memorizzate`;
   updateSortIndicators('.stock-sort', state.stockSortKey, state.stockSortDir);
   const body = $('#stockBody');
@@ -541,7 +553,15 @@ const MESI_NOMI = ['gennaio','febbraio','marzo','aprile','maggio','giugno',
 
 // Un numero da solo non dice se e' tanto o poco: accanto va messo lo stesso
 // tratto del mese prima, confrontando periodi della stessa lunghezza.
-function renderAnalisi() {
+async function renderAnalisi() {
+  if (!state.analisi) {
+    try {
+      state.analisi = await api('/api/analisi');
+    } catch (err) {
+      showToast(`Analisi non disponibili: ${err.message}`, true);
+      return;
+    }
+  }
   renderMese();
   renderAndamento();
 }
@@ -549,7 +569,7 @@ function renderAnalisi() {
 function renderMese() {
   const zona = $('#mesePanel');
   if (!zona) return;
-  const dati = state.data?.mese;
+  const dati = state.analisi?.mese;
   if (!dati) { zona.innerHTML = ''; return; }
   const meseScorso = MESI_NOMI[Number(String(dati.prima_da).slice(5, 7)) - 1] || '';
   const voci = [
@@ -587,7 +607,7 @@ const GRAF_COLORI = ['var(--accent)', '#7d8794'];
 function renderAndamento() {
   const tela = $('#grafico');
   const legenda = $('#grafLegenda');
-  const dati = state.data?.serie;
+  const dati = state.analisi?.serie;
   if (!tela || !legenda) return;
   if (!dati || !(dati.giorni || []).length) { tela.innerHTML = ''; legenda.innerHTML = ''; return; }
 
@@ -704,6 +724,8 @@ function renderKpis() {
   $('#tabDeliveringCount').textContent = inConsegna;
   $('#tabActiveCount').textContent = attive;
   segnalaStatiDaClassificare(unknown);
+  // Il numero sul tab arriva da un conteggio, non dallo storico intero.
+  if (!state.giacenzeCaricate) $('#tabStockCount').textContent = Number(state.data?.giacenze_totali || 0);
   if (state.view === 'analisi') renderAnalisi();
   $('#tabAllCount').textContent = state.tutteCaricate
     ? rows.length
@@ -1119,7 +1141,7 @@ function bindDrawer(item) {
       });
       showToast(`GLS: ${res.message || 'istruzione accettata'}`);
       await loadDashboard({quiet:true});
-      await loadStockHistory({quiet:true});
+      await aggiornaGiacenzeSeVisibili();
       await openDrawer(item.tracking_number);
     } catch (err) {
       showToast(`Svincolo non confermato: ${err.message}`, true);
@@ -1197,7 +1219,7 @@ async function pollSyncProgress() {
     renderSyncProgress(p);
     if (p.running) return true;
     await loadDashboard({quiet:true});
-    await loadStockHistory({quiet:true});
+    await aggiornaGiacenzeSeVisibili();
     if (p.phase === 'DONE') setTimeout(() => $('#syncPanel').classList.add('hidden'), 4500);
     return false;
   } catch (err) {
@@ -1230,7 +1252,7 @@ async function syncNow() {
       // Deploy serverless: la sincronizzazione e' gia' conclusa quando risponde.
       showToast('Sincronizzazione completata');
       await loadDashboard({quiet:true});
-      await loadStockHistory({quiet:true});
+      await aggiornaGiacenzeSeVisibili();
       setSyncBusy(false);
       return;
     }
@@ -1449,11 +1471,16 @@ function bind() {
 
 bind();
 loadDashboard();
-loadStockHistory({quiet:true});
 // Se all'apertura una sincronizzazione e' gia' in corso, la barra deve
 // aggiornarsi da sola invece di restare ferma sul primo valore letto.
 pollSyncProgress().then(inCorso => { if (inCorso) startSyncPolling(); });
-setInterval(() => { loadDashboard({quiet:true}); loadStockHistory({quiet:true}); }, 30000);
+// Ricarico solo quello che e' a schermo. Lo storico giacenze e' la richiesta
+// piu' pesante del sito: tenerlo in aggiornamento mentre si guarda la coda
+// significa interrogare il database per dati che nessuno sta leggendo.
+setInterval(() => {
+  loadDashboard({quiet: true});
+  if (state.view === 'stocks') loadStockHistory({quiet: true});
+}, 30000);
 
 // ---------------------------------------------------------------------------
 // Assistente
