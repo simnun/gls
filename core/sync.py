@@ -316,6 +316,14 @@ class SyncEngine:
             fresh_shipments = self.shopify.extract_gls_shipments(orders)
             discovered_tracking = len(fresh_shipments)
             sostituite = self._chiudi_tracking_sostituiti(orders)
+            # Un ordine annullato toglie senso alla spedizione: la pratica esce
+            # dalla coda qualunque cosa stia facendo il collo, tranne quando e'
+            # fermo in giacenza e il rientro non e' ancora stato chiesto.
+            annullate = self.db.chiudi_ordini_annullati()
+            if sostituite or annullate:
+                self._set_progress(label=(
+                    f"Chiuse {sostituite + len(annullate)} pratiche senza seguito "
+                    "(ordine annullato o tracking sostituito)\u2026"))
             existing = self.db.tracking_state_map()
 
             # Aggiornamento incrementale:

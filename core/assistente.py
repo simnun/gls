@@ -162,6 +162,7 @@ ETICHETTE_CATEGORIA = {
     "LINEHAUL_DELAY": "in ritardo", "CORRESPONDENT": "presso corrispondente",
     "SERVICE_AREA": "in zona disagiata", "LABEL_CREATED": "appena affidate a GLS",
     "ACTION_REQUIRED": "che richiedono un intervento", "UNCLASSIFIED": "ancora da classificare",
+    "ORDER_CANCELLED": "con l\u2019ordine annullato", "REPLACED_CARRIER": "passate a un altro corriere",
 }
 
 ETICHETTE_GRUPPO = {

@@ -1331,6 +1331,47 @@ class Database:
             ],
         }
 
+    def chiudi_ordini_annullati(self) -> list[dict[str, Any]]:
+        """Chiude le pratiche il cui ordine su Shopify e' stato annullato.
+
+        Se l'ordine non esiste piu', la spedizione non ha piu' uno scopo: il
+        collo tornera' indietro da solo e non c'e' niente da decidere. Resta
+        in archivio con l'esito che GLS le ha dato - resa al mittente,
+        consegnata, o quello che e' - ma esce dalla coda di lavoro.
+
+        Una sola eccezione, e pesa: se il collo e' fermo in giacenza e nessuno
+        ha ancora mandato l'istruzione di rientro, la pratica resta visibile.
+        E' l'unico caso in cui non fare niente costa: il pacco rimane in sede
+        ad accumulare giorni di deposito finche' qualcuno non dice a GLS di
+        riportarlo indietro.
+        """
+        motivo = "Ordine annullato su Shopify: la pratica non ha piu' seguito."
+        azione = "Nessun intervento: l'ordine e' stato annullato."
+        with self.connect() as conn:
+            righe = conn.execute(
+                """
+                SELECT tracking_number, order_name, category, gls_status
+                FROM shipments s
+                WHERE s.closed=0 AND COALESCE(s.order_cancelled_at,'')<>''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM stock_cases sc
+                      WHERE sc.tracking_number=s.tracking_number AND sc.status='OPEN'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM gls_release_requests r
+                            WHERE r.stock_case_id=sc.id AND r.gls_success=1
+                        )
+                  )
+                """
+            ).fetchall()
+            chiuse = [dict(r) for r in righe]
+            for riga in chiuse:
+                conn.execute(
+                    "UPDATE shipments SET closed=1, reason=?, recommended_action=?"
+                    " WHERE tracking_number=?",
+                    (motivo, azione, riga["tracking_number"]),
+                )
+        return chiuse
+
     def get_shipment(self, tracking_number: str) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM shipments WHERE tracking_number=?", (tracking_number,)).fetchone()

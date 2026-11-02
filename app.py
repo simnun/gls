@@ -508,9 +508,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 ripristinate = DB.ripristina_lavorazioni_annullate()
                 ricalcolate = DB.ricalcola_ultima_attivita()
                 concluse = DB.concludi_pratiche_chiuse_senza_eventi()
+                annullate = DB.chiudi_ordini_annullati()
                 return self._json({"ok": True, "ripristinate": len(ripristinate),
                                    "attivita_ricalcolate": ricalcolate,
                                    "pratiche_concluse": concluse,
+                                   "ordini_annullati_chiusi": len(annullate),
                                    "pratiche": ripristinate[:50]})
 
             if path == "/api/sync":
