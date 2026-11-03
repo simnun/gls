@@ -335,7 +335,7 @@ function aggiornaOra() {
   const m = minutiFa(fine);
   let t = 'Mai aggiornato';
   if (m != null) t = m < 1 ? 'Aggiornato adesso' : m < 60 ? `Aggiornato ${m} min fa` : m < 1440 ? `Aggiornato ${Math.floor(m / 60)} h fa` : `Aggiornato il ${giorno(fine)}`;
-  if (!S.sync) $('#aggiornato').textContent = t;
+  if (!S.sync) { $('#aggiornato').textContent = t; $('#aggiornatoTel').textContent = t; }
 }
 
 function disegnaCode() {
@@ -631,39 +631,63 @@ async function caricaNovita() {
     disegna();
   } catch { S.novita = null; }
 }
-function disegnaNovita() {
-  const box = $('#novita');
+// Fuori dal pannello resta solo un pulsante piccolo nella testata: il
+// numero dice quante pratiche GLS ha toccato, il rosso se qualcuna chiede
+// di intervenire.
+function contaNovita() {
   const n = S.novita;
-  if (!n || !n.totale || S.sezioneBase !== 'coda') { box.classList.add('nascosto-del-tutto'); return; }
+  if (!n || !n.totale) return null;
   const perTracking = new Map(spedizioni().map(r => [r.tracking_number, r]));
-  const voci = (n.pratiche || []).slice(0, 8);
-  const daGestire = (n.pratiche || []).filter(p => daVerificare(perTracking.get(p.tracking_number) || p)).length;
-  box.innerHTML = `<div class="novita-testa"><div>
-      <h2>${esc(dalMomento(n.dal))}, GLS ha aggiornato ${plurale(n.totale, 'pratica', 'pratiche')}</h2>
-      <p>È l’ultima volta che hai segnato le novità come viste. ${daGestire === 0 ? 'Nessuna chiede di intervenire.' : daGestire === 1 ? 'Una sola chiede di intervenire.' : `${daGestire} chiedono di intervenire.`}</p>
-    </div><button type="button" class="tasto" id="novitaViste">Segna tutte come viste</button></div>
-    <ul>${voci.map(p => {
-      const r = perTracking.get(p.tracking_number) || p;
-      const g = gravita(r);
-      const prima = p.prima ? (TITOLI[p.prima.category] || p.prima.state || 'Prima') : 'Prima notizia';
-      const dopo = p.dopo ? (TITOLI[p.dopo.category] || p.dopo.state || 'Aggiornata') : titolo(r);
-      const serve = daVerificare(r);
-      const esito = serve ? 'Da gestire' : r.closed ? 'Chiusa' : inLavorazione(r) ? 'Già in lavorazione' : 'Nessuna azione';
-      return `<li data-tracking="${esc(p.tracking_number)}" tabindex="0">
-        <span class="forte taglia">${esc(r.order_name || p.tracking_number)} · ${esc(r.customer_name || 'Cliente')}</span>
-        <span class="in-linea"><span class="etichetta e-neutro">${esc(prima)}</span><svg class="verso" viewBox="0 0 24 24" role="img" aria-label="diventa">${TRATTI.freccia}</svg><span class="etichetta e-${g}">${esc(dopo)}</span><span class="piccolo">${esc(giornoOra(p.dopo?.event_at || p.arrivato))}</span></span>
-        <span class="esito-azione ${serve ? 'serve' : 'niente'}">${esito}</span></li>`;
-    }).join('')}</ul>
-    ${n.totale > voci.length ? `<p class="piccolo">E altre ${n.totale - voci.length}: hanno l’etichetta Novità nell’elenco.</p>` : ''}`;
-  box.classList.remove('nascosto-del-tutto');
+  const voci = (n.pratiche || []).map(p => ({ p, r: perTracking.get(p.tracking_number) || p }));
+  return { n, voci, daGestire: voci.filter(v => daVerificare(v.r)).length };
+}
+function disegnaNovita() {
+  const tasto = $('#apriNovita');
+  const c = contaNovita();
+  if (!c) { tasto.classList.add('nascosto-del-tutto'); return; }
+  $('#novitaNumero').textContent = c.n.totale > 99 ? '99+' : String(c.n.totale);
+  $('#novitaNumero').classList.toggle('urgente', c.daGestire > 0);
+  tasto.setAttribute('aria-label', `Novità da GLS: ${plurale(c.n.totale, 'pratica aggiornata', 'pratiche aggiornate')}${c.daGestire ? `, ${c.daGestire} da gestire` : ''}`);
+  tasto.classList.remove('nascosto-del-tutto');
+  if (!$('#pannelloNovita').classList.contains('nascosto-del-tutto')) disegnaPannelloNovita();
+}
+function apriNovita(opener) {
+  disegnaPannelloNovita();
+  apriPannello('pannelloNovita', opener);
+}
+function disegnaPannelloNovita() {
+  const p = $('#pannelloNovita');
+  const c = contaNovita();
+  if (!c) { chiudiPannelli(); return; }
+  // Prima quelle da gestire, poi le altre dalla piu' recente.
+  const voci = c.voci.slice().sort((a, b) => Number(daVerificare(b.r)) - Number(daVerificare(a.r)));
+  const riga = ({ p: v, r }) => {
+    const g = gravita(r);
+    const prima = v.prima ? (TITOLI[v.prima.category] || v.prima.state || 'Prima') : 'Prima notizia';
+    const dopo = v.dopo ? (TITOLI[v.dopo.category] || v.dopo.state || 'Aggiornata') : titolo(r);
+    const serve = daVerificare(r);
+    const esito = serve ? 'Da gestire' : r.closed ? 'Chiusa' : inLavorazione(r) ? 'In lavorazione' : 'Nessuna azione';
+    return `<li data-tracking="${esc(v.tracking_number)}" tabindex="0">
+      <span class="in-linea"><span class="forte taglia">${esc(r.order_name || v.tracking_number)} · ${esc(r.customer_name || 'Cliente')}</span><span class="esito-azione ${serve ? 'serve' : 'niente'}">${esito}</span></span>
+      <span class="in-linea"><span class="etichetta e-neutro">${esc(prima)}</span><svg class="verso" viewBox="0 0 24 24" role="img" aria-label="diventa">${TRATTI.freccia}</svg><span class="etichetta e-${g}">${esc(dopo)}</span><span class="piccolo">${esc(giornoOra(v.dopo?.event_at || v.arrivato))}</span></span></li>`;
+  };
+  const altre = c.n.totale - voci.length;
+  p.innerHTML = `<div class="pannello-testa"><div class="pannello-titolo"><div><h2>Novità da GLS</h2>
+      <span class="meta">${esc(dalMomento(c.n.dal))}: ${plurale(c.n.totale, 'pratica aggiornata', 'pratiche aggiornate')} · ${c.daGestire === 0 ? 'nessuna da gestire' : c.daGestire === 1 ? 'una da gestire' : `${c.daGestire} da gestire`}</span></div>${tastoChiudi()}</div>
+      <div><button type="button" class="tasto" id="novitaViste">Segna tutte come viste</button></div></div>
+    <div class="pannello-corpo novita"><ul>${voci.map(riga).join('')}</ul>
+      ${altre > 0 ? `<p class="piccolo">E altre ${altre}: hanno l’etichetta Novità nell’elenco.</p>` : ''}</div>`;
+  $('.chiudi-pannello', p).addEventListener('click', chiudiPannelli);
   $('#novitaViste').addEventListener('click', () => {
     memoria('glsNuovaVisto', new Date().toISOString());
     S.novita = null; S.novitaSet = new Set();
+    chiudiPannelli();
     disegna();
   });
-  $$('li[data-tracking]', box).forEach(li => {
-    li.addEventListener('click', () => apriDettaglio(li.dataset.tracking, li));
-    li.addEventListener('keydown', (e) => { if (e.key === 'Enter') apriDettaglio(li.dataset.tracking, li); });
+  $$('li[data-tracking]', p).forEach(li => {
+    const apri = () => { S.tornaANovita = true; apriDettaglio(li.dataset.tracking, $('#apriNovita')); };
+    li.addEventListener('click', apri);
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter') apri(); });
   });
 }
 
@@ -671,8 +695,9 @@ function disegnaNovita() {
 // Pannelli
 // ---------------------------------------------------------------------------
 
+const PANNELLI = ['dettaglio', 'chat', 'analisi', 'pannelloNovita'];
 function apriPannello(id, opener) {
-  ['dettaglio', 'chat', 'analisi'].forEach(p => { if (p !== id) $('#' + p).classList.add('nascosto-del-tutto'); });
+  PANNELLI.forEach(p => { if (p !== id) $('#' + p).classList.add('nascosto-del-tutto'); });
   S.opener = opener || document.activeElement;
   $('#velo').classList.remove('nascosto-del-tutto');
   const p = $('#' + id);
@@ -681,7 +706,11 @@ function apriPannello(id, opener) {
   setTimeout(() => p.focus({ preventScroll: true }), 0);
 }
 function chiudiPannelli() {
-  ['dettaglio', 'chat', 'analisi'].forEach(p => $('#' + p).classList.add('nascosto-del-tutto'));
+  // Una pratica aperta dalle novita' riporta all'elenco delle novita'.
+  const torna = S.tornaANovita && !$('#dettaglio').classList.contains('nascosto-del-tutto') && contaNovita();
+  S.tornaANovita = false;
+  if (torna) { S.dettaglio = null; return apriNovita($('#apriNovita')); }
+  PANNELLI.forEach(p => $('#' + p).classList.add('nascosto-del-tutto'));
   $('#velo').classList.add('nascosto-del-tutto');
   document.body.style.overflow = '';
   S.dettaglio = null;
@@ -1060,7 +1089,6 @@ function mostraSezione(sezione) {
   $('#vistaGiacenze').classList.toggle('nascosto-del-tutto', !giacenze);
   $('#vistaCoda').classList.toggle('nascosto-del-tutto', giacenze);
   $('#filtri').classList.toggle('nascosto-del-tutto', giacenze);
-  if (giacenze) $('#novita').classList.add('nascosto-del-tutto');
 }
 
 async function apriGiacenze() {
@@ -1314,6 +1342,7 @@ async function sincronizza() {
   S.sync = true;
   $('#avanzamento').classList.remove('nascosto-del-tutto');
   $('#aggiornato').textContent = 'Aggiornamento in corso';
+  $('#aggiornatoTel').textContent = 'Aggiornamento in corso';
   try {
     const r = await api('/api/sync', { method: 'POST', body: '{}' });
     if (r && r.done) return fineSync('Aggiornamento completato');
@@ -1369,6 +1398,7 @@ function collega() {
   $('#apriRicerca').addEventListener('click', () => { const b = $('#ricercaBox'); b.classList.toggle('aperta'); if (b.classList.contains('aperta')) $('#cerca').focus(); });
   $('#sincronizza').addEventListener('click', sincronizza);
   $('#apriChat').addEventListener('click', (e) => apriChat(e.currentTarget));
+  $('#apriNovita').addEventListener('click', (e) => apriNovita(e.currentTarget));
   $('#apriAnalisi').addEventListener('click', (e) => apriAnalisi(e.currentTarget));
   $('#apriArchivio').addEventListener('click', (e) => { e.stopPropagation(); apriMenu(e.currentTarget, $('#menuArchivio')); });
   $('#apriImpostazioni').addEventListener('click', (e) => { e.stopPropagation(); apriMenu(e.currentTarget, $('#menuImpostazioni')); });

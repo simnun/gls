@@ -66,6 +66,8 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .marchio { display: flex; align-items: center; gap: 8px; flex: none; }
 .marchio-segno { width: 32px; height: 32px; border-radius: 8px; background: #fff; color: var(--testata); display: grid; place-items: center; font-weight: 600; font-size: 16px; }
 .marchio-nome { font-weight: 600; font-size: 16px; }
+.marchio-testo { display: flex; flex-direction: column; line-height: 1.25; }
+.aggiornato-tel { display: none; font-size: 12px; color: var(--testata-tenue); }
 .ricerca { flex: 1 1 320px; max-width: 560px; position: relative; display: flex; align-items: center; }
 .ricerca-icona { position: absolute; left: 16px; width: 16px; height: 16px; color: var(--testata-tenue); }
 .ricerca input {
@@ -207,17 +209,17 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .scheda .nota { font-size: 13px; color: var(--tenue); }
 .azioni-centro { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 
-/* Novita' da GLS */
-.novita { background: var(--superficie); border: 1px solid #b2ccef; border-radius: var(--raggio-grande); padding: 24px; display: flex; flex-direction: column; gap: 16px; }
-.novita-testa { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
-.novita-testa > div { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 4px; }
-.novita h2 { font-size: 18px; }
-.novita p { color: var(--tenue); }
+/* Novita' da GLS: pulsante nella testata, elenco in un pannello */
+.tasto-novita { padding: 0 8px 0 12px; font-weight: 400; }
+.tasto-novita .numero { min-width: 24px; height: 24px; padding: 0 8px; border-radius: 12px; background: rgba(255,255,255,.16); color: #fff; font-size: 12px; font-weight: 600; display: grid; place-items: center; }
+.tasto-novita .numero.urgente { background: var(--massima); }
 .novita ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.novita li { display: grid; grid-template-columns: 232px minmax(0, 1fr) 160px; gap: 16px; align-items: center; padding: 16px 0; border-top: 1px solid var(--riga); cursor: pointer; }
-.novita li:hover { background: #fbfcfd; }
+.novita li { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-top: 1px solid var(--riga); cursor: pointer; }
+.novita li:first-child { border-top: 0; padding-top: 0; }
+.novita li:hover .forte { color: var(--accento); }
+.novita li > .in-linea:first-child { justify-content: space-between; flex-wrap: nowrap; }
 .novita .verso { width: 16px; height: 16px; color: var(--tenue); }
-.novita .esito-azione { justify-self: end; font-size: 14px; }
+.novita .esito-azione { font-size: 13px; white-space: nowrap; flex: none; }
 .novita .esito-azione.serve { font-weight: 600; color: var(--massima); }
 .novita .esito-azione.niente { color: var(--tenue); }
 
@@ -402,7 +404,10 @@ h1, h2, h3, b, strong { font-weight: 600; }
   .ricerca.aperta { display: flex; }
   .testata-destra { gap: 4px; }
   .tasto-icona.scuro { border: 0; width: 44px; height: 44px; }
-  .aggiornato { font-size: 12px; }
+  .aggiornato { display: none; }
+  .aggiornato-tel { display: block; }
+  .testata { flex-wrap: nowrap; }
+  .testata .ricerca.aperta { position: absolute; left: 16px; right: 16px; top: 100%; padding: 8px 0; background: var(--testata); }
   .pagina { padding: 16px 16px 96px; gap: 8px; }
   .barra-code { flex-wrap: nowrap; margin: 0 -16px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
   .code { flex-wrap: nowrap; }
@@ -441,10 +446,7 @@ h1, h2, h3, b, strong { font-weight: 600; }
   .piede-elenco { display: none; }
   .vuoto { padding: 32px 16px; background: var(--superficie); border: 1px solid var(--bordo-chiaro); border-radius: var(--raggio-grande); }
   .schede, .mese { grid-template-columns: 1fr; }
-  .novita { padding: 16px; }
-  .novita li { grid-template-columns: 1fr; gap: 8px; }
-  .novita li:nth-child(n+4) { display: none; }
-  .novita .esito-azione { justify-self: start; }
+  .tasto-novita { border: 0; height: 44px; padding: 0 8px; }
   .barra-selezione { bottom: 80px; padding: 8px; }
 
   .navigazione-basso {

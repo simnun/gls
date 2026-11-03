@@ -16,7 +16,7 @@
   <header class="testata">
     <div class="marchio">
       <span class="marchio-segno" aria-hidden="true">G</span>
-      <span class="marchio-nome">GLS Monitor</span>
+      <span class="marchio-testo"><span class="marchio-nome">GLS Monitor</span><span class="aggiornato-tel" id="aggiornatoTel"></span></span>
     </div>
     <div class="ricerca" id="ricercaBox">
       <label for="cerca" class="nascosto">Cerca una pratica</label>
@@ -25,6 +25,10 @@
     </div>
     <div class="testata-destra">
       <span id="aggiornato" class="aggiornato">Caricamento…</span>
+      <button type="button" class="tasto scuro tasto-novita nascosto-del-tutto" id="apriNovita" aria-label="Novità da GLS">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9z"/><path d="M10 19a2 2 0 0 0 4 0"/></svg>
+        <span class="solo-scrivania">Novità</span><span class="numero" id="novitaNumero"></span>
+      </button>
       <button type="button" class="tasto-icona scuro solo-telefono" id="apriRicerca" aria-label="Cerca">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
       </button>
@@ -44,7 +48,6 @@
   </header>
 
   <main id="contenuto" class="pagina">
-    <section id="novita" class="novita nascosto-del-tutto" aria-label="Cosa è cambiato da GLS"></section>
 
     <div class="barra-code">
       <nav class="code" aria-label="Code di lavoro" id="code"></nav>
@@ -120,6 +123,7 @@
   <aside class="pannello nascosto-del-tutto" id="dettaglio" aria-label="Pratica" tabindex="-1"></aside>
   <aside class="pannello stretto nascosto-del-tutto" id="chat" aria-label="Chiedi al monitor" tabindex="-1"></aside>
   <aside class="pannello nascosto-del-tutto" id="analisi" aria-label="Analisi del mese" tabindex="-1"></aside>
+  <aside class="pannello stretto nascosto-del-tutto" id="pannelloNovita" aria-label="Novità da GLS" tabindex="-1"></aside>
   <div class="avviso nascosto-del-tutto" id="avviso" role="status" aria-live="polite"></div>
 
   <script src="/nuova.js"></script>
