@@ -316,10 +316,13 @@ class AppHandler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
 
-        # La nuova interfaccia vive accanto a quella di sempre: stesso server,
-        # stessi dati, stesso accesso. La pagina attuale non cambia.
-        if path in {"/nuova", "/nuova/"}:
+        # La pagina principale e' la nuova interfaccia; /nuova resta valido per
+        # chi l'aveva salvato. La pagina classica rimane su /classica, con gli
+        # stessi dati e le funzioni di amministrazione.
+        if path in {"", "/", "/nuova", "/nuova/"}:
             return self._serve_static("/nuova.html")
+        if path in {"/classica", "/classica/"}:
+            return self._serve_static("/index.html")
 
         if path == "/api/novita":
             dal = (parse_qs(parsed.query).get("dal") or [""])[0]

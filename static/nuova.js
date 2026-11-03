@@ -377,7 +377,7 @@ function disegnaMenuArchivio() {
 function disegnaMenuImpostazioni() {
   const multi = S.dati?.config?.multi_user || S.me?.multi_user;
   $('#menuImpostazioni').innerHTML = `
-    <a role="menuitem" href="/">Pagina classica ${ic('esterno')}</a>
+    <a role="menuitem" href="/classica">Pagina classica ${ic('esterno')}</a>
     <button type="button" role="menuitem" id="voceAnalisi">Analisi del mese</button>
     ${multi ? '<hr><button type="button" role="menuitem" id="voceEsci">Esci</button>' : ''}`;
   $('#voceAnalisi')?.addEventListener('click', () => { chiudiMenu(); apriAnalisi(); });
