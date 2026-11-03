@@ -22,7 +22,6 @@ const S = {
   sezioneBase: 'coda',
   opener: null,
   sync: null,
-  invio: null,
 };
 
 const CODE = [
@@ -162,16 +161,6 @@ function telefonoLocale(v) {
   if (c.startsWith('0039')) c = c.slice(4); else if (c.startsWith('39') && c.length > 10) c = c.slice(2);
   return c;
 }
-function telefonoInternazionale(v) {
-  const grezzo = String(v || '').trim();
-  let c = cifre(grezzo);
-  if (!c) return '';
-  if (grezzo.startsWith('+')) return c;
-  if (c.startsWith('00')) return c.slice(2);
-  if (c.startsWith('39') && c.length > 10) return c;
-  return '39' + c;
-}
-function nomeProprio(v) { return String(v || '').trim().split(/\s+/)[0] || ''; }
 function plurale(n, uno, tanti) { return `${n} ${n === 1 ? uno : tanti}`; }
 
 async function api(path, opzioni = {}) {
@@ -251,7 +240,7 @@ function azioneRiga(r) {
   if (r.closed) return { tipo: 'apri', testo: 'Apri' };
   if (giacenzaAperta(r) && !svincoli(r).riuscito) return { tipo: 'svincola', testo: 'Svincola', primario: true };
   if (CHIAMA.includes(r.category) && r.customer_phone) return { tipo: 'chiama', testo: 'Chiama' };
-  if (SCRIVI.includes(r.category) && (r.customer_phone || r.customer_email)) return { tipo: 'scrivi', testo: 'Scrivi' };
+  if (SCRIVI.includes(r.category) && r.customer_phone) return { tipo: 'scrivi', testo: 'Scrivi' };
   return { tipo: 'apri', testo: 'Apri' };
 }
 function statoPratica(r) {
@@ -582,7 +571,9 @@ function faiPasso(tracking, tasto) {
   const r = spedizioni().find(x => x.tracking_number === tracking);
   if (!r) return;
   const tipo = azioneRiga(r).tipo;
-  if (tipo === 'scrivi') return apriMessaggio([r], tasto);
+  // Spoki si apre in un'altra scheda; qui resta la pratica pronta per
+  // registrare il messaggio quando si torna.
+  if (tipo === 'scrivi') { apriSpoki(r); return apriDettaglio(tracking, tasto, { contatto: 'CUSTOMER_MESSAGE' }); }
   if (tipo === 'chiama') {
     if (matchMedia('(max-width: 760px)').matches && r.customer_phone) location.href = `tel:${r.customer_phone}`;
     return apriDettaglio(tracking, tasto, { contatto: 'CUSTOMER_CALLED' });
@@ -599,14 +590,11 @@ function disegnaSelezione() {
   const barra = $('#barraSelezione');
   const scelte = spedizioni().filter(r => S.scelte.has(r.tracking_number));
   if (!scelte.length) { barra.classList.add('nascosto-del-tutto'); return; }
-  const raggiungibili = scelte.filter(r => r.customer_phone || r.customer_email).length;
   barra.innerHTML = `<span class="quante">${plurale(scelte.length, 'pratica scelta', 'pratiche scelte')}</span>
-    ${raggiungibili ? `<button type="button" class="tasto primo" id="multiScrivi">${raggiungibili === 1 ? 'Scrivi al cliente' : `Scrivi ai ${raggiungibili} clienti`}</button>` : ''}
-    <button type="button" class="tasto" id="multiCarico">Prendile in carico</button>
+    <button type="button" class="tasto primo" id="multiCarico">Prendile in carico</button>
     <button type="button" class="tasto" id="multiChiudi">Chiudile</button>
     <button type="button" class="tasto-icona" id="multiAnnulla" aria-label="Annulla la selezione">${ic('chiudi')}</button>`;
   barra.classList.remove('nascosto-del-tutto');
-  $('#multiScrivi')?.addEventListener('click', (e) => apriMessaggio(scelte.filter(r => r.customer_phone || r.customer_email), e.currentTarget));
   $('#multiCarico').addEventListener('click', () => cambiaStatoMolte(scelte, 'IN_PROGRESS'));
   $('#multiChiudi').addEventListener('click', () => {
     if (!confirm(`Chiudere ${plurale(scelte.length, 'pratica', 'pratiche')}? Escono dalle code finché GLS non scrive qualcosa di nuovo.`)) return;
@@ -754,7 +742,7 @@ function disegnaDettaglio(item, opzioni = {}) {
 
   const contatti = [];
   if (item.customer_phone) contatti.push(`<a class="tasto" href="tel:${esc(item.customer_phone)}">${ic('telefono')}${esc(item.customer_phone)}</a>`);
-  if (item.customer_phone || item.customer_email) contatti.push(`<button type="button" class="tasto" id="dScrivi">${ic('busta')}Scrivi</button>`);
+  if (item.customer_phone) contatti.push(`<button type="button" class="tasto" id="dScrivi">${ic('busta')}Scrivi su Spoki</button>`);
   if (links.gls) contatti.push(`<a class="tasto mono" href="${esc(links.gls)}" target="_blank" rel="noopener">${esc(item.tracking_number)}${ic('esterno')}</a>`);
   if (links.shopify) contatti.push(`<a class="tasto" href="${esc(links.shopify)}" target="_blank" rel="noopener">Ordine Shopify${ic('esterno')}</a>`);
 
@@ -805,7 +793,7 @@ function disegnaDettaglio(item, opzioni = {}) {
     </div>
     <div class="pannello-piede">
       ${item.customer_phone ? `<a class="tasto" href="tel:${esc(item.customer_phone)}">${ic('telefono')}Chiama</a>` : ''}
-      ${item.customer_phone || item.customer_email ? `<button type="button" class="tasto" id="pScrivi">${ic('busta')}Scrivi</button>` : ''}
+      ${item.customer_phone ? `<button type="button" class="tasto" id="pScrivi">${ic('busta')}Scrivi</button>` : ''}
       ${aperta && !sv.riuscito ? '<button type="button" class="tasto primario" id="pSvincola">Svincola</button>' : '<button type="button" class="tasto primario" id="pRegistra">Registra</button>'}
     </div>`;
   collegaDettaglio(item, opzioni);
@@ -899,8 +887,14 @@ function mostraNelPannello(sel, morbido = false) {
 function collegaDettaglio(item, opzioni) {
   const p = $('#dettaglio');
   $('.chiudi-pannello', p).addEventListener('click', chiudiPannelli);
-  $('#dScrivi')?.addEventListener('click', (e) => apriMessaggio([item], e.currentTarget));
-  $('#pScrivi')?.addEventListener('click', (e) => apriMessaggio([item], e.currentTarget));
+  // Dopo Spoki la pratica e' gia' pronta per registrare "Messaggio inviato".
+  const scriviSpoki = () => {
+    if (!apriSpoki(item)) return;
+    const chip = $('[data-contatto="CUSTOMER_MESSAGE"]', p);
+    if (chip && chip.getAttribute('aria-pressed') !== 'true') chip.click();
+  };
+  $('#dScrivi')?.addEventListener('click', scriviSpoki);
+  $('#pScrivi')?.addEventListener('click', scriviSpoki);
   $('#pSvincola')?.addEventListener('click', () => mostraNelPannello('#dSvincolo', true));
   $('#pRegistra')?.addEventListener('click', () => { mostraNelPannello('#dRegistra', true); $('#dNota')?.focus({ preventScroll: true }); });
   $('#dTuttoStorico')?.addEventListener('click', (e) => { $$('.in-piu', p).forEach(x => x.classList.remove('nascosto-del-tutto')); e.currentTarget.remove(); });
@@ -1023,134 +1017,18 @@ async function dopoUnAzione(tracking) {
 }
 
 // ---------------------------------------------------------------------------
-// Messaggi pronti al cliente
+// Scrivere al cliente: si passa da Spoki, come nella pagina classica
 // ---------------------------------------------------------------------------
 
-const MODELLI = [
-  { id: 'giacenza', nome: 'Giacenza: chiedere quando è in casa', per: ['STORAGE'],
-    testo: 'Buongiorno {nome}, le scriviamo da Zuiki per il suo ordine {ordine}.\n\nIl pacco è fermo nella sede GLS{sede} perché il corriere non è riuscito a consegnarlo. Ci dice in che giorno è in casa? Lo facciamo ripartire subito.' },
-  { id: 'indirizzo', nome: 'Indirizzo errato: chiedere l’indirizzo giusto', per: ['ADDRESS_ERROR'],
-    testo: 'Buongiorno {nome}, le scriviamo da Zuiki per il suo ordine {ordine}.\n\nIl corriere GLS segnala che l’indirizzo di consegna è incompleto o non corretto. Ci manda l’indirizzo giusto, con numero civico, scala o citofono? Lo giriamo subito a GLS.' },
-  { id: 'assente', nome: 'Destinatario assente: avvisare del nuovo tentativo', per: ['ABSENT', 'DELIVERY_RETRY', 'RECIPIENT_CLOSED', 'DELIVERY_FAILURE'],
-    testo: 'Buongiorno {nome}, le scriviamo da Zuiki per il suo ordine {ordine}.\n\nIl corriere GLS è passato ma non ha trovato nessuno. Ritenterà la consegna nel primo giorno lavorativo: se non sarà in casa, ci dica quando preferisce e lo comunichiamo a GLS.' },
-  { id: 'contrassegno', nome: 'Contrassegno: tenere pronto l’importo', per: ['COD_ISSUE'],
-    testo: 'Buongiorno {nome}, le scriviamo da Zuiki per il suo ordine {ordine}.\n\nLe ricordiamo che il pagamento è alla consegna: tenga pronto l’importo per il corriere GLS, così la consegna va a buon fine al primo passaggio.' },
-  { id: 'ritiro', nome: 'Ritiro in sede: indicare dove ritirarla', per: ['PICKUP_AT_DEPOT'],
-    testo: 'Buongiorno {nome}, le scriviamo da Zuiki per il suo ordine {ordine}.\n\nIl pacco è pronto per il ritiro nella sede GLS{sede}. Può passare a ritirarlo con un documento e il numero di spedizione {tracking}.' },
-  { id: 'rifiuto', nome: 'Rifiutata: capire cosa è successo', per: ['REFUSED'],
-    testo: 'Buongiorno {nome}, le scriviamo da Zuiki per il suo ordine {ordine}.\n\nIl corriere GLS segnala che la consegna è stata rifiutata. È successo qualcosa? Ci scriva pure: se vuole ancora il pacco lo facciamo ripartire.' },
-  { id: 'generico', nome: 'Aggiornamento sulla spedizione', per: [],
-    testo: 'Buongiorno {nome}, le scriviamo da Zuiki per il suo ordine {ordine}.\n\nAbbiamo un aggiornamento sulla spedizione GLS: {stato}. Se ha domande ci risponda pure qui.' },
-];
-
-function modelloPer(r) { return MODELLI.find(m => m.per.includes(r.category)) || MODELLI[MODELLI.length - 1]; }
-function componi(modello, r) {
-  const sedeNome = r.gls_destination_city || r.gls_location || '';
-  const campi = {
-    nome: nomeProprio(r.customer_name), ordine: r.order_name || '', sede: sedeNome ? ` di ${sedeNome}` : '',
-    tracking: r.tracking_number || '', stato: (r.gls_status || '').replace(/\.$/, '').toLowerCase(),
-  };
-  let testo = modello.testo.replace(/\{(\w+)\}/g, (_, k) => campi[k] ?? '');
-  if (!campi.nome) testo = testo.replace('Buongiorno , ', 'Buongiorno, ');
-  if (r.is_cod && r.total_amount != null) testo += `\n\nIl pagamento è in contrassegno: ${soldi(r.total_amount, r.currency)} da consegnare al corriere.`;
-  testo += '\n\nGrazie!';
-  const compilati = [['Nome', Boolean(campi.nome)], ['Ordine', Boolean(campi.ordine)]];
-  if (modello.testo.includes('{sede}')) compilati.push(['Sede GLS', Boolean(sedeNome)]);
-  if (r.is_cod) compilati.push(['Importo del contrassegno', r.total_amount != null]);
-  return { testo, compilati };
+function urlSpoki(r) {
+  const c = cifre(r.customer_phone);
+  return c ? `https://app.spoki.com/contacts?search=${encodeURIComponent(c)}` : '';
 }
-
-function apriMessaggio(righe, opener) {
-  if (!righe.length) return;
-  S.invio = { righe, indice: 0, canale: null, opener: opener || document.activeElement, fatte: 0 };
-  $('#finestraFondo').classList.remove('nascosto-del-tutto');
-  disegnaMessaggio();
-}
-function chiudiMessaggio() {
-  $('#finestraFondo').classList.add('nascosto-del-tutto');
-  const o = S.invio?.opener;
-  S.invio = null;
-  if (o && document.contains(o)) o.focus();
-}
-function disegnaMessaggio() {
-  const inv = S.invio; const r = inv.righe[inv.indice];
-  const canali = [];
-  if (r.customer_phone) canali.push(['whatsapp', 'WhatsApp'], ['sms', 'SMS']);
-  if (r.customer_email) canali.splice(1, 0, ['email', 'Email']);
-  if (!inv.canale || !canali.some(c => c[0] === inv.canale)) inv.canale = canali[0]?.[0];
-  const modello = modelloPer(r);
-  const { testo, compilati } = componi(modello, r);
-  const sequenza = inv.righe.length > 1 ? ` <span class="meta">(${inv.indice + 1} di ${inv.righe.length})</span>` : '';
-  const dove = giacenzaAperta(r) ? `in giacenza ${daQuanto(r.gls_event_at)}${r.gls_destination_city ? ` nella sede di ${r.gls_destination_city}` : ''}` : titolo(r).toLowerCase();
-  const verso = inv.canale === 'email' ? r.customer_email : r.customer_phone;
-  const nomeCanale = { whatsapp: 'WhatsApp', email: 'l’email', sms: 'gli SMS' }[inv.canale];
-  $('#messaggio').innerHTML = `
-    <div class="pannello-testa"><div class="pannello-titolo"><div><h2 id="messaggioTitolo">Scrivi a ${esc(r.customer_name || 'cliente')}${sequenza}</h2><span class="meta">${esc(r.order_name || '')} · ${esc(dove)}</span></div>
-      <button type="button" class="tasto-icona" id="mChiudi" aria-label="Chiudi">${ic('chiudi')}</button></div></div>
-    <div class="pannello-corpo">
-      <div class="campo">Come lo mandi
-        <div class="segmenti" role="group" aria-label="Canale">${canali.map(([k, t]) => `<button type="button" data-canale="${k}" aria-pressed="${inv.canale === k}">${t}</button>`).join('')}</div>
-        <span class="aiuto">A ${esc(verso || '—')}</span>
-      </div>
-      <label class="campo">Modello
-        <select id="mModello">${MODELLI.map(m => `<option value="${m.id}" ${m.id === modello.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('')}</select>
-        <span class="aiuto">Scelto in base allo stato della spedizione.</span>
-      </label>
-      <label class="campo">Messaggio<textarea id="mTesto" rows="9">${esc(testo)}</textarea></label>
-      <div class="campo">Compilato dal monitor
-        <div class="compilati" id="mCompilati">${compilatiHtml(compilati)}</div>
-      </div>
-      <label class="spuntina"><input type="checkbox" id="mRegistra" checked> Registra nella pratica come “Messaggio cliente inviato”</label>
-    </div>
-    <div class="finestra-piede">
-      <button type="button" class="tasto grande" id="mAnnulla">${inv.righe.length > 1 ? 'Salta' : 'Annulla'}</button>
-      <button type="button" class="tasto primario grande" id="mInvia">Apri ${esc(nomeCanale || 'il messaggio')} con il messaggio${inv.righe.length > 1 && inv.indice < inv.righe.length - 1 ? ' e passa al prossimo' : ''}</button>
-    </div>`;
-  $('#mChiudi').addEventListener('click', chiudiMessaggio);
-  $('#mAnnulla').addEventListener('click', () => (inv.righe.length > 1 ? prossimoMessaggio() : chiudiMessaggio()));
-  $$('[data-canale]').forEach(b => b.addEventListener('click', () => {
-    const testoAttuale = $('#mTesto').value; const mod = $('#mModello').value;
-    inv.canale = b.dataset.canale; disegnaMessaggio();
-    $('#mModello').value = mod; $('#mTesto').value = testoAttuale;
-  }));
-  $('#mModello').addEventListener('change', (e) => {
-    const m = MODELLI.find(x => x.id === e.target.value);
-    const c = componi(m, r);
-    $('#mTesto').value = c.testo; $('#mCompilati').innerHTML = compilatiHtml(c.compilati);
-  });
-  $('#mInvia').addEventListener('click', () => inviaMessaggio(r));
-  setTimeout(() => $('#mInvia').focus(), 0);
-}
-function compilatiHtml(voci) {
-  return voci.map(([nome, ok]) => ok
-    ? `<span class="etichetta e-NORMAL">${ic('spunta')}${esc(nome)}</span>`
-    : `<span class="etichetta e-WARNING">${ic('allarme')}Manca: ${esc(nome.toLowerCase())}</span>`).join('');
-}
-async function inviaMessaggio(r) {
-  const inv = S.invio;
-  const testo = $('#mTesto').value;
-  const modello = $('#mModello').selectedOptions[0]?.textContent || '';
-  let url = '';
-  if (inv.canale === 'whatsapp') url = `https://wa.me/${telefonoInternazionale(r.customer_phone)}?text=${encodeURIComponent(testo)}`;
-  else if (inv.canale === 'sms') url = `sms:${r.customer_phone}?&body=${encodeURIComponent(testo)}`;
-  else url = `mailto:${r.customer_email}?subject=${encodeURIComponent(`Il suo ordine ${r.order_name || ''} · Zuiki`)}&body=${encodeURIComponent(testo)}`;
-  if (inv.canale === 'whatsapp') window.open(url, '_blank', 'noopener');
-  else { const a = document.createElement('a'); a.href = url; a.click(); }
-  if ($('#mRegistra').checked) {
-    const canale = { whatsapp: 'WhatsApp', sms: 'SMS', email: 'email' }[inv.canale];
-    const ok = await registraAzione(r, 'CUSTOMER_MESSAGE', `Via ${canale}: ${modello}`);
-    if (ok) inv.fatte += 1;
-  }
-  prossimoMessaggio();
-}
-async function prossimoMessaggio() {
-  const inv = S.invio; if (!inv) return;
-  if (inv.indice < inv.righe.length - 1) { inv.indice += 1; disegnaMessaggio(); return; }
-  const tante = inv.righe.length > 1;
-  const fatte = inv.fatte;
-  chiudiMessaggio();
-  if (tante) { S.scelte.clear(); avvisa(`${plurale(fatte, 'messaggio registrato', 'messaggi registrati')} nelle pratiche`); }
-  await caricaDati({ quieto: true });
+function apriSpoki(r) {
+  const url = urlSpoki(r);
+  if (!url) { avvisa('Il cliente non ha un numero di telefono: scrivi dall’email.', true); return false; }
+  window.open(url, '_blank', 'noopener');
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1480,10 +1358,8 @@ function collega() {
   $('#apriImpostazioni').addEventListener('click', (e) => { e.stopPropagation(); apriMenu(e.currentTarget, $('#menuImpostazioni')); });
   document.addEventListener('click', (e) => { if (!e.target.closest('.menu-ancora')) chiudiMenu(); });
   $('#velo').addEventListener('click', chiudiPannelli);
-  $('#finestraFondo').addEventListener('click', (e) => { if (e.target.id === 'finestraFondo') chiudiMessaggio(); });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!$('#finestraFondo').classList.contains('nascosto-del-tutto')) return chiudiMessaggio();
     if (!$$('.menu').every(m => m.classList.contains('nascosto-del-tutto'))) return chiudiMenu();
     if (!$('#velo').classList.contains('nascosto-del-tutto')) return chiudiPannelli();
   });

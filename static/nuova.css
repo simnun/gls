@@ -326,17 +326,6 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .dato .voce { font-size: 12px; color: var(--tenue); }
 .dato .valore { font-size: 14px; overflow-wrap: anywhere; }
 
-/* Finestra messaggi */
-.finestra-fondo { position: fixed; inset: 0; z-index: 50; background: rgba(7, 24, 39, .4); display: grid; place-items: center; padding: 16px; }
-.finestra {
-  width: 640px; max-width: 100%; max-height: calc(100vh - 32px); background: var(--superficie);
-  border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--ombra);
-}
-.finestra .pannello-corpo { gap: 24px; }
-.finestra-piede { padding: 16px 24px; border-top: 1px solid var(--bordo-chiaro); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: none; }
-.compilati { display: flex; flex-wrap: wrap; gap: 8px; }
-.compilati .etichetta { height: 28px; border-radius: 14px; }
-
 /* Storico giacenze */
 .titolo-vista { display: flex; flex-direction: column; gap: 8px; }
 .titolo-vista h1 { font-size: 24px; }
@@ -467,9 +456,6 @@ h1, h2, h3, b, strong { font-weight: 600; }
   .pannello-piede .tasto { flex: 1; height: 48px; padding: 0 8px; }
   .campi, .dati { grid-template-columns: 1fr; }
   .campo.largo { grid-column: auto; }
-  .finestra-fondo { padding: 0; place-items: end stretch; }
-  .finestra { width: 100%; max-height: 100vh; border-radius: 16px 16px 0 0; }
-  .finestra-piede .tasto { flex: 1; }
   .avviso { bottom: 88px; }
   .storico li { grid-template-columns: 16px minmax(0, 1fr); }
   .storico .quando { grid-column: 2; }
