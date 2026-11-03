@@ -573,10 +573,10 @@ function faiPasso(tracking, tasto) {
   const tipo = azioneRiga(r).tipo;
   // Spoki si apre in un'altra scheda; qui resta la pratica pronta per
   // registrare il messaggio quando si torna.
-  if (tipo === 'scrivi') { apriSpoki(r); return apriDettaglio(tracking, tasto, { contatto: 'CUSTOMER_MESSAGE' }); }
+  if (tipo === 'scrivi') { const ok = apriSpoki(r); return apriDettaglio(tracking, tasto, ok ? { proponi: 'CUSTOMER_MESSAGE' } : {}); }
   if (tipo === 'chiama') {
     if (matchMedia('(max-width: 760px)').matches && r.customer_phone) location.href = `tel:${r.customer_phone}`;
-    return apriDettaglio(tracking, tasto, { contatto: 'CUSTOMER_CALLED' });
+    return apriDettaglio(tracking, tasto, { proponi: 'CUSTOMER_CALLED' });
   }
   if (tipo === 'svincola') return apriDettaglio(tracking, tasto, { vaiA: 'svincolo' });
   apriDettaglio(tracking, tasto);
@@ -761,23 +761,27 @@ function disegnaDettaglio(item, opzioni = {}) {
         <p>${esc(item.gls_status || 'Stato GLS non disponibile')}${item.gls_note && item.gls_note !== item.gls_status ? ` · ${esc(item.gls_note)}` : ''}</p>
         <span class="dove">${quando ? `Ultimo evento GLS ${esc(quandoDetto(quando))}` : 'Nessun evento GLS'}${item.gls_location ? ` · ${esc(item.gls_location)}` : ''}</span>
       </section>
+      <div id="dProposta"></div>
       ${fasce.join('')}
       ${aperta ? formSvincolo(item, sv) : passoSemplice(item)}
-      <section class="sezione" id="dRegistra" aria-label="Registra cosa hai fatto">
-        <h3>Cosa hai fatto</h3>
-        <div class="scelte" role="group" aria-label="Tipo di contatto">
-          ${[['CUSTOMER_MESSAGE', 'Messaggio inviato'], ['CUSTOMER_CALLED', 'Cliente chiamato'], ['GLS_CONTACTED', 'GLS contattato']]
-            .map(([k, t]) => `<button type="button" class="scelta" data-contatto="${k}" aria-pressed="${opzioni.contatto === k}">${t}</button>`).join('')}
+      <section class="sezione" id="dRegistra" aria-label="Registra intervento">
+        <div class="titolo-sezione"><h3>Registra intervento</h3><span class="meta">un clic e resta nello storico</span></div>
+        <label class="nascosto" for="dNota">Nota dell’intervento</label>
+        <textarea id="dNota" class="area" rows="2" placeholder="Nota facoltativa: es. cliente conferma indirizzo, contattata sede GLS…"></textarea>
+        <div class="interventi">
+          ${[['CUSTOMER_MESSAGE', 'busta', 'Messaggio inviato'], ['CUSTOMER_CALLED', 'telefono', 'Cliente chiamato'], ['GLS_CONTACTED', 'pacco', 'GLS contattato'], ['NOTE', 'piu', 'Registra nota']]
+            .map(([k, i, t]) => `<button type="button" class="tasto" data-intervento="${k}">${ic(i)}${t}</button>`).join('')}
         </div>
-        <label class="nascosto" for="dNota">Nota</label>
-        <textarea id="dNota" class="area" rows="2" placeholder="Nota facoltativa: cosa ti ha detto il cliente"></textarea>
-        <div class="tra">
-          <div class="segmenti" role="group" aria-label="Stato della pratica">
-            ${[['NEW', 'Nuova'], ['IN_PROGRESS', 'In lavorazione'], ['RESOLVED', 'Chiusa']]
-              .map(([k, t]) => `<button type="button" data-stato="${k}" aria-pressed="${(opzioni.contatto && workflow === 'NEW' ? 'IN_PROGRESS' : workflow) === k}">${t}</button>`).join('')}
-          </div>
-          <button type="button" class="tasto" id="dRegistraTasto"><b>Registra</b></button>
+      </section>
+      <section class="sezione con-linea" id="dPratica" aria-label="Stato della pratica">
+        <div class="titolo-sezione"><h3>Stato della pratica</h3><span class="meta">lasciala aperta o chiudila a mano</span></div>
+        <div class="segmenti" role="group" aria-label="Stato della pratica">
+          ${[['IN_PROGRESS', 'In lavorazione'], ['RESOLVED', 'Chiusa']]
+            .map(([k, t]) => `<button type="button" data-stato="${k}" aria-pressed="${workflow === k}">${t}</button>`).join('')}
         </div>
+        <label class="nascosto" for="dNotaPratica">Nota della pratica</label>
+        <textarea id="dNotaPratica" class="area" rows="2" placeholder="Nota generale della pratica…">${esc(item.operator_note || '')}</textarea>
+        <div><button type="button" class="tasto" id="dSalvaPratica"><b>Salva pratica</b></button></div>
       </section>
       ${storico(item)}
       <section class="sezione con-linea" aria-label="Dati della spedizione">
@@ -887,27 +891,26 @@ function mostraNelPannello(sel, morbido = false) {
 function collegaDettaglio(item, opzioni) {
   const p = $('#dettaglio');
   $('.chiudi-pannello', p).addEventListener('click', chiudiPannelli);
-  // Dopo Spoki la pratica e' gia' pronta per registrare "Messaggio inviato".
-  const scriviSpoki = () => {
-    if (!apriSpoki(item)) return;
-    const chip = $('[data-contatto="CUSTOMER_MESSAGE"]', p);
-    if (chip && chip.getAttribute('aria-pressed') !== 'true') chip.click();
-  };
+  // Dopo Spoki la pratica propone di registrare il messaggio con un clic.
+  const scriviSpoki = () => { if (apriSpoki(item)) proponi(item, 'CUSTOMER_MESSAGE'); };
   $('#dScrivi')?.addEventListener('click', scriviSpoki);
   $('#pScrivi')?.addEventListener('click', scriviSpoki);
   $('#pSvincola')?.addEventListener('click', () => mostraNelPannello('#dSvincolo', true));
   $('#pRegistra')?.addEventListener('click', () => { mostraNelPannello('#dRegistra', true); $('#dNota')?.focus({ preventScroll: true }); });
   $('#dTuttoStorico')?.addEventListener('click', (e) => { $$('.in-piu', p).forEach(x => x.classList.remove('nascosto-del-tutto')); e.currentTarget.remove(); });
 
-  $$('[data-contatto]', p).forEach(b => b.addEventListener('click', () => {
-    const era = b.getAttribute('aria-pressed') === 'true';
-    $$('[data-contatto]', p).forEach(x => x.setAttribute('aria-pressed', 'false'));
-    b.setAttribute('aria-pressed', String(!era));
-    if (!era && $('[data-stato="NEW"]', p).getAttribute('aria-pressed') === 'true') segnaStato('IN_PROGRESS');
+  // Come nella pagina classica: ogni intervento si registra con un clic.
+  $$('[data-intervento]', p).forEach(b => b.addEventListener('click', async () => {
+    const tipo = b.dataset.intervento;
+    const nota = $('#dNota').value.trim();
+    if (tipo === 'NOTE' && !nota) { avvisa('Scrivi la nota prima di registrarla.', true); $('#dNota').focus(); return; }
+    b.disabled = true;
+    const ok = await registraAzione(item, tipo, nota);
+    if (!ok) b.disabled = false;
   }));
-  const segnaStato = (k) => $$('[data-stato]', p).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.stato === k)));
-  $$('[data-stato]', p).forEach(b => b.addEventListener('click', () => segnaStato(b.dataset.stato)));
-  $('#dRegistraTasto').addEventListener('click', () => registra(item));
+  $$('[data-stato]', p).forEach(b => b.addEventListener('click', () =>
+    $$('[data-stato]', p).forEach(x => x.setAttribute('aria-pressed', String(x === b)))));
+  $('#dSalvaPratica').addEventListener('click', () => salvaPratica(item));
 
   $$('[data-annulla]', p).forEach(b => b.addEventListener('click', async () => {
     if (!confirm('Cancellare questa operazione dallo storico?')) return;
@@ -933,7 +936,25 @@ function collegaDettaglio(item, opzioni) {
     $('#sFuori').addEventListener('click', () => registraAzione(item, 'STOCK_MANUAL_HANDLED', $('#dNota').value || ''));
   }
   if (opzioni.vaiA === 'svincolo') setTimeout(() => { mostraNelPannello('#dSvincolo'); $('#sTipo')?.focus({ preventScroll: true }); }, 60);
-  if (opzioni.contatto) setTimeout(() => { mostraNelPannello('#dRegistra'); $('#dNota')?.focus({ preventScroll: true }); }, 60);
+  if (opzioni.proponi) proponi(item, opzioni.proponi);
+}
+
+// Una riga in cima al pannello: "Hai scritto al cliente? Registra".
+function proponi(item, tipo) {
+  const box = $('#dProposta'); if (!box) return;
+  const testi = {
+    CUSTOMER_MESSAGE: ['Spoki è aperto in un’altra scheda.', 'Quando hai scritto al cliente, registralo qui.', 'Registra messaggio inviato'],
+    CUSTOMER_CALLED: ['Chiama il cliente.', 'Finita la chiamata, registrala qui. La nota va nel campo di Registra intervento.', 'Registra cliente chiamato'],
+  }[tipo];
+  if (!testi) return;
+  box.innerHTML = `<div class="fascia novita-gls">${ic(tipo === 'CUSTOMER_CALLED' ? 'telefono' : 'busta')}<div><strong>${testi[0]}</strong><span>${testi[1]}</span>
+    <div class="riga-tasti proposta-tasti"><button type="button" class="tasto primario" id="dPropostaSi">${testi[2]}</button><button type="button" class="collegamento" id="dPropostaNo">Non ora</button></div></div></div>`;
+  const corpo = $('#dettaglio .pannello-corpo'); if (corpo) corpo.scrollTo({ top: 0 });
+  $('#dPropostaSi').addEventListener('click', async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    if (!(await registraAzione(item, tipo, ($('#dNota')?.value || '').trim()))) b.disabled = false;
+  });
+  $('#dPropostaNo').addEventListener('click', () => { box.innerHTML = ''; });
 }
 
 function chiediConferma(item) {
@@ -976,18 +997,15 @@ async function inviaSvincolo(item) {
   }
 }
 
-async function registra(item) {
+async function salvaPratica(item) {
   const p = $('#dettaglio');
-  const contatto = $('[data-contatto][aria-pressed="true"]', p)?.dataset.contatto;
   const stato = $('[data-stato][aria-pressed="true"]', p)?.dataset.stato || 'IN_PROGRESS';
-  const nota = $('#dNota').value.trim();
-  if (contatto || nota) return registraAzione(item, contatto || 'NOTE', nota, stato);
   const nome = operatore(); if (!nome) return;
   try {
     await api(`/api/shipment/${encodeURIComponent(item.tracking_number)}/workflow`, {
-      method: 'POST', body: JSON.stringify({ workflow_status: stato, operator_name: nome }),
+      method: 'POST', body: JSON.stringify({ workflow_status: stato, operator_note: $('#dNotaPratica').value, operator_name: nome }),
     });
-    avvisa(stato === 'RESOLVED' ? 'Pratica chiusa' : stato === 'NEW' ? 'Pratica rimessa fra le nuove' : 'Pratica in lavorazione');
+    avvisa(stato === 'RESOLVED' ? 'Pratica chiusa' : 'Pratica aggiornata');
     await dopoUnAzione(item.tracking_number);
   } catch (err) { avvisa(err.message, true); }
 }

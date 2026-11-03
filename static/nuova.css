@@ -309,6 +309,11 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .segmenti button { height: 40px; padding: 0 16px; border: 0; background: var(--superficie); color: var(--testo-2); font-size: 14px; }
 .segmenti button + button { border-left: 1px solid var(--bordo); }
 .segmenti button[aria-pressed="true"] { background: var(--scuro); color: #fff; font-weight: 600; }
+.titolo-sezione { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.interventi { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.interventi .tasto { justify-content: flex-start; height: 44px; }
+.interventi .tasto svg { color: var(--testo-2); }
+.proposta-tasti { margin-top: 8px; gap: 8px; }
 .tra { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
 
 .storico { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
@@ -466,3 +471,5 @@ h1, h2, h3, b, strong { font-weight: 600; }
   .elenco-giacenze .riga { display: flex; }
   .freccia-apri { display: none; }
 }
+
+#dProposta:empty { display: none; }
