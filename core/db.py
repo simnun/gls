@@ -163,6 +163,7 @@ class Database:
                     FOREIGN KEY(tracking_number) REFERENCES shipments(tracking_number) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_tracking ON events(tracking_number, event_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 
                 CREATE TABLE IF NOT EXISTS operator_actions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1371,6 +1372,113 @@ class Database:
                     (motivo, azione, riga["tracking_number"]),
                 )
         return chiuse
+
+    def novita_dal(self, dal: str | None, limite: int = 50) -> dict[str, Any]:
+        """Le pratiche su cui GLS ha scritto qualcosa dopo `dal`.
+
+        Conta il momento in cui il monitor ha ricevuto l'evento, non l'ora
+        scritta da GLS: chi torna al lavoro vuole sapere cosa e' arrivato
+        mentre era via, anche se GLS lo ha datato a ieri sera. Accanto allo
+        stato nuovo c'e' quello che l'operatore aveva visto l'ultima volta,
+        cosi' si capisce subito in che direzione si e' mossa la pratica.
+        """
+        momento = self._parse_dt(dal) if dal else None
+        if momento is None:
+            momento = datetime.now(timezone.utc) - timedelta(hours=24)
+        soglia = momento.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+        with self.connect() as conn:
+            toccate = conn.execute(
+                """SELECT tracking_number, MAX(created_at) AS arrivato
+                   FROM events WHERE created_at > ?
+                   GROUP BY tracking_number ORDER BY arrivato DESC LIMIT ?""",
+                (soglia, max(1, limite)),
+            ).fetchall()
+            totale = conn.execute(
+                "SELECT COUNT(DISTINCT tracking_number) FROM events WHERE created_at > ?", (soglia,)
+            ).fetchone()[0]
+            voci: list[dict[str, Any]] = []
+            for riga in toccate:
+                numero = riga["tracking_number"]
+                spedizione = conn.execute(
+                    """SELECT tracking_number, order_name, customer_name, city, province, category,
+                              severity, closed, workflow_status, is_cod
+                       FROM shipments WHERE tracking_number=?""",
+                    (numero,),
+                ).fetchone()
+                if not spedizione:
+                    continue
+                dopo = conn.execute(
+                    """SELECT state, note, category, event_at FROM events
+                       WHERE tracking_number=? AND created_at > ?
+                       ORDER BY COALESCE(event_at, created_at) DESC, id DESC LIMIT 1""",
+                    (numero, soglia),
+                ).fetchone()
+                prima = conn.execute(
+                    """SELECT state, category, event_at FROM events
+                       WHERE tracking_number=? AND created_at <= ?
+                       ORDER BY COALESCE(event_at, created_at) DESC, id DESC LIMIT 1""",
+                    (numero, soglia),
+                ).fetchone()
+                voce = dict(spedizione)
+                voce["closed"] = bool(voce.get("closed"))
+                voce["is_cod"] = bool(voce.get("is_cod"))
+                voce["arrivato"] = riga["arrivato"]
+                voce["dopo"] = dict(dopo) if dopo else None
+                voce["prima"] = dict(prima) if prima else None
+                voci.append(voce)
+        return {"dal": soglia, "totale": int(totale or 0), "pratiche": voci}
+
+    def riepilogo_oggi(self, oggi: Any = None) -> dict[str, Any]:
+        """Che cosa ha fatto il team oggi, per la coda che si e' svuotata."""
+        from .timezones import ROME
+
+        oggi = oggi or datetime.now(ROME).date()
+        inizio = datetime(oggi.year, oggi.month, oggi.day, tzinfo=ROME)
+        fine = inizio + timedelta(days=1)
+        # Azioni e svincoli sono scritti in UTC; gli eventi GLS in ora italiana.
+        da = inizio.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+        a = fine.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+        giorno = oggi.isoformat()
+        with self.connect() as conn:
+            per_operatore = [
+                {"nome": r["nome"], "pratiche": int(r["pratiche"] or 0)}
+                for r in conn.execute(
+                    """SELECT COALESCE(NULLIF(operator_name,''), 'Senza nome') AS nome,
+                              COUNT(DISTINCT tracking_number) AS pratiche
+                       FROM operator_actions WHERE created_at >= ? AND created_at < ?
+                       GROUP BY 1 ORDER BY pratiche DESC, nome""",
+                    (da, a),
+                ).fetchall()
+            ]
+            gestite = conn.execute(
+                """SELECT COUNT(DISTINCT tracking_number) FROM operator_actions
+                   WHERE created_at >= ? AND created_at < ?""",
+                (da, a),
+            ).fetchone()[0]
+            svincoli = conn.execute(
+                """SELECT COUNT(*) AS tutti,
+                          SUM(CASE WHEN gls_success=1 THEN 1 ELSE 0 END) AS accettati
+                   FROM gls_release_requests WHERE created_at >= ? AND created_at < ?""",
+                (da, a),
+            ).fetchone()
+            consegnate = conn.execute(
+                """SELECT COUNT(*) AS tutte,
+                          SUM(CASE WHEN EXISTS (SELECT 1 FROM stock_cases sc
+                                                WHERE sc.tracking_number=s.tracking_number)
+                              THEN 1 ELSE 0 END) AS dopo_giacenza
+                   FROM shipments s
+                   WHERE s.category='DELIVERED' AND substr(COALESCE(s.gls_event_at,''),1,10)=?""",
+                (giorno,),
+            ).fetchone()
+        return {
+            "giorno": giorno,
+            "gestite": int(gestite or 0),
+            "per_operatore": per_operatore,
+            "svincoli": int((svincoli["tutti"] if svincoli else 0) or 0),
+            "svincoli_accettati": int((svincoli["accettati"] if svincoli else 0) or 0),
+            "consegnate": int((consegnate["tutte"] if consegnate else 0) or 0),
+            "consegnate_dopo_giacenza": int((consegnate["dopo_giacenza"] if consegnate else 0) or 0),
+        }
 
     def get_shipment(self, tracking_number: str) -> dict[str, Any] | None:
         with self.connect() as conn:

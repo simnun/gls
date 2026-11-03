@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>GLS Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/nuova.css">
+</head>
+<body>
+  <a class="salta" href="#contenuto">Vai al contenuto</a>
+
+  <header class="testata">
+    <div class="marchio">
+      <span class="marchio-segno" aria-hidden="true">G</span>
+      <span class="marchio-nome">GLS Monitor</span>
+    </div>
+    <div class="ricerca" id="ricercaBox">
+      <label for="cerca" class="nascosto">Cerca una pratica</label>
+      <svg class="ricerca-icona" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+      <input id="cerca" type="search" placeholder="Cerca ordine, cliente o tracking" autocomplete="off">
+    </div>
+    <div class="testata-destra">
+      <span id="aggiornato" class="aggiornato">Caricamento…</span>
+      <button type="button" class="tasto-icona scuro solo-telefono" id="apriRicerca" aria-label="Cerca">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+      </button>
+      <button type="button" class="tasto-icona scuro" id="sincronizza" aria-label="Aggiorna adesso da Shopify e GLS" title="Aggiorna adesso da Shopify e GLS">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
+      </button>
+      <button type="button" class="tasto scuro solo-scrivania" id="apriChat">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l2.1 5.9L20 12l-5.9 2.1L12 20l-2.1-5.9L4 12l5.9-2.1L12 4z"/></svg>
+        Chiedi
+      </button>
+      <span class="utente solo-scrivania" id="utente"></span>
+    </div>
+    <div class="avanzamento nascosto-del-tutto" id="avanzamento" role="status" aria-live="polite">
+      <div class="avanzamento-barra"><span id="avanzamentoBarra"></span></div>
+      <span id="avanzamentoTesto">Sincronizzazione…</span>
+    </div>
+  </header>
+
+  <main id="contenuto" class="pagina">
+    <section id="novita" class="novita nascosto-del-tutto" aria-label="Cosa è cambiato da GLS"></section>
+
+    <div class="barra-code">
+      <nav class="code" aria-label="Code di lavoro" id="code"></nav>
+      <div class="barra-code-destra">
+        <div class="menu-ancora">
+          <button type="button" class="tasto chiaro" id="apriArchivio" aria-haspopup="true" aria-expanded="false">
+            <span id="archivioEtichetta">Archivio</span>
+            <svg class="giu" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="menu nascosto-del-tutto" id="menuArchivio" role="menu"></div>
+        </div>
+        <button type="button" class="tasto-icona chiaro solo-scrivania" id="apriAnalisi" aria-label="Analisi del mese" title="Analisi del mese">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.6A9 9 0 0 1 20.4 9H15z"/></svg>
+        </button>
+        <div class="menu-ancora">
+          <button type="button" class="tasto-icona chiaro" id="apriImpostazioni" aria-label="Altre funzioni" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
+          </button>
+          <div class="menu a-destra nascosto-del-tutto" id="menuImpostazioni" role="menu"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="filtri" id="filtri">
+      <label class="pillola-scelta"><span class="nascosto">Priorità</span>
+        <select id="filtroPriorita">
+          <option value="">Priorità: tutte</option>
+          <option value="CRITICAL">Massima</option>
+          <option value="WARNING">Alta</option>
+          <option value="WATCH">Osservazione</option>
+          <option value="INFO">Informativa</option>
+          <option value="NORMAL">Normale</option>
+        </select>
+      </label>
+      <label class="pillola-scelta"><span class="nascosto">Stato GLS</span>
+        <select id="filtroStato"><option value="">Stato GLS: tutti</option></select>
+      </label>
+      <label class="pillola-scelta"><span class="nascosto">Periodo dell’ordine</span>
+        <select id="filtroPeriodo">
+          <option value="">Periodo: sempre</option>
+          <option value="1">Ordini di oggi</option>
+          <option value="7">Ultimi 7 giorni</option>
+          <option value="30">Ultimi 30 giorni</option>
+        </select>
+      </label>
+      <label class="pillola-spunta"><input type="checkbox" id="filtroContrassegno"> Solo contrassegno</label>
+      <button type="button" class="collegamento nascosto-del-tutto" id="azzeraFiltri">Togli i filtri</button>
+      <span class="conteggio" id="conteggio"></span>
+    </div>
+
+    <section id="vistaCoda" class="riquadro elenco" aria-label="Pratiche"></section>
+    <section id="vistaGiacenze" class="nascosto-del-tutto" aria-label="Storico giacenze"></section>
+  </main>
+
+  <div class="barra-selezione nascosto-del-tutto" id="barraSelezione" role="toolbar" aria-label="Azioni sulle pratiche scelte"></div>
+
+  <nav class="navigazione-basso" aria-label="Sezioni">
+    <button type="button" data-sezione="coda" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Coda
+    </button>
+    <button type="button" data-sezione="giacenze">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 7.5l-8.5-4.5-8.5 4.5v9l8.5 4.5 8.5-4.5z"/><path d="M3.5 7.5l8.5 4.5 8.5-4.5M12 12v9"/></svg>Giacenze
+    </button>
+    <button type="button" data-sezione="analisi">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.6A9 9 0 0 1 20.4 9H15z"/></svg>Analisi
+    </button>
+    <button type="button" data-sezione="chiedi">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l2.1 5.9L20 12l-5.9 2.1L12 20l-2.1-5.9L4 12l5.9-2.1L12 4z"/></svg>Chiedi
+    </button>
+  </nav>
+
+  <div class="velo nascosto-del-tutto" id="velo"></div>
+  <aside class="pannello nascosto-del-tutto" id="dettaglio" aria-label="Pratica" tabindex="-1"></aside>
+  <aside class="pannello stretto nascosto-del-tutto" id="chat" aria-label="Chiedi al monitor" tabindex="-1"></aside>
+  <aside class="pannello nascosto-del-tutto" id="analisi" aria-label="Analisi del mese" tabindex="-1"></aside>
+  <div class="finestra-fondo nascosto-del-tutto" id="finestraFondo">
+    <div class="finestra" id="messaggio" role="dialog" aria-modal="true" aria-labelledby="messaggioTitolo"></div>
+  </div>
+  <div class="avviso nascosto-del-tutto" id="avviso" role="status" aria-live="polite"></div>
+
+  <script src="/nuova.js"></script>
+</body>
+</html>

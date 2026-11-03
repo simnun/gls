@@ -316,6 +316,18 @@ class AppHandler(BaseHTTPRequestHandler):
         if not self._require_auth():
             return
 
+        # La nuova interfaccia vive accanto a quella di sempre: stesso server,
+        # stessi dati, stesso accesso. La pagina attuale non cambia.
+        if path in {"/nuova", "/nuova/"}:
+            return self._serve_static("/nuova.html")
+
+        if path == "/api/novita":
+            dal = (parse_qs(parsed.query).get("dal") or [""])[0]
+            return self._json(DB.novita_dal(dal or None))
+
+        if path == "/api/oggi":
+            return self._json(DB.riepilogo_oggi())
+
         if path == "/api/me":
             user = self._session_user()
             return self._json({
