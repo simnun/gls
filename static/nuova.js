@@ -691,7 +691,7 @@ function apriPannello(id, opener) {
   const p = $('#' + id);
   p.classList.remove('nascosto-del-tutto');
   document.body.style.overflow = 'hidden';
-  setTimeout(() => p.focus(), 0);
+  setTimeout(() => p.focus({ preventScroll: true }), 0);
 }
 function chiudiPannelli() {
   ['dettaglio', 'chat', 'analisi'].forEach(p => $('#' + p).classList.add('nascosto-del-tutto'));
@@ -886,13 +886,23 @@ function storico(item) {
     ${tutti.length > 6 ? `<button type="button" class="collegamento" id="dTuttoStorico">Mostra tutti gli eventi (${tutti.length})</button>` : ''}</section>`;
 }
 
+// Porta una sezione in vista scorrendo solo il corpo del pannello.
+// scrollIntoView scorrerebbe anche il pannello stesso (che ha overflow
+// nascosto): la testata sparirebbe in alto lasciando una fascia bianca.
+function mostraNelPannello(sel, morbido = false) {
+  const corpo = $('#dettaglio .pannello-corpo'); const el = $(sel);
+  if (!corpo || !el) return;
+  const top = el.getBoundingClientRect().top - corpo.getBoundingClientRect().top + corpo.scrollTop - 16;
+  corpo.scrollTo({ top: Math.max(0, top), behavior: morbido ? 'smooth' : 'auto' });
+}
+
 function collegaDettaglio(item, opzioni) {
   const p = $('#dettaglio');
   $('.chiudi-pannello', p).addEventListener('click', chiudiPannelli);
   $('#dScrivi')?.addEventListener('click', (e) => apriMessaggio([item], e.currentTarget));
   $('#pScrivi')?.addEventListener('click', (e) => apriMessaggio([item], e.currentTarget));
-  $('#pSvincola')?.addEventListener('click', () => $('#dSvincolo')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  $('#pRegistra')?.addEventListener('click', () => { $('#dRegistra')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#dNota')?.focus(); });
+  $('#pSvincola')?.addEventListener('click', () => mostraNelPannello('#dSvincolo', true));
+  $('#pRegistra')?.addEventListener('click', () => { mostraNelPannello('#dRegistra', true); $('#dNota')?.focus({ preventScroll: true }); });
   $('#dTuttoStorico')?.addEventListener('click', (e) => { $$('.in-piu', p).forEach(x => x.classList.remove('nascosto-del-tutto')); e.currentTarget.remove(); });
 
   $$('[data-contatto]', p).forEach(b => b.addEventListener('click', () => {
@@ -928,8 +938,8 @@ function collegaDettaglio(item, opzioni) {
     $('#sInvia').addEventListener('click', () => chiediConferma(item));
     $('#sFuori').addEventListener('click', () => registraAzione(item, 'STOCK_MANUAL_HANDLED', $('#dNota').value || ''));
   }
-  if (opzioni.vaiA === 'svincolo') setTimeout(() => { $('#dSvincolo')?.scrollIntoView({ block: 'start' }); $('#sTipo')?.focus(); }, 60);
-  if (opzioni.contatto) setTimeout(() => { $('#dRegistra')?.scrollIntoView({ block: 'center' }); $('#dNota')?.focus(); }, 60);
+  if (opzioni.vaiA === 'svincolo') setTimeout(() => { mostraNelPannello('#dSvincolo'); $('#sTipo')?.focus({ preventScroll: true }); }, 60);
+  if (opzioni.contatto) setTimeout(() => { mostraNelPannello('#dRegistra'); $('#dNota')?.focus({ preventScroll: true }); }, 60);
 }
 
 function chiediConferma(item) {
@@ -947,7 +957,7 @@ function chiediConferma(item) {
     <div class="riga-tasti"><button type="button" class="tasto ${grave ? 'pericolo' : 'primario'}" id="sSi">Sì, invia a GLS</button><button type="button" class="tasto" id="sNo">Annulla</button></div></div>`;
   $('#sNo').addEventListener('click', () => { $('#sConferma').innerHTML = ''; $('#sTasti').classList.remove('nascosto-del-tutto'); });
   $('#sSi').addEventListener('click', () => inviaSvincolo(item));
-  $('#sSi').focus();
+  $('#sSi').focus({ preventScroll: true });
 }
 
 async function inviaSvincolo(item) {

@@ -238,7 +238,7 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .pannello {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: 600px; max-width: 100vw;
   background: var(--superficie); border-left: 1px solid var(--bordo-chiaro); box-shadow: var(--ombra);
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden; overflow: clip;
 }
 .pannello.stretto { width: 480px; }
 .pannello:focus { outline: none; }
