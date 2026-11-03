@@ -578,7 +578,6 @@ function faiPasso(tracking, tasto) {
     if (matchMedia('(max-width: 760px)').matches && r.customer_phone) location.href = `tel:${r.customer_phone}`;
     return apriDettaglio(tracking, tasto, { proponi: 'CUSTOMER_CALLED' });
   }
-  if (tipo === 'svincola') return apriDettaglio(tracking, tasto, { vaiA: 'svincolo' });
   apriDettaglio(tracking, tasto);
 }
 
@@ -763,16 +762,16 @@ function disegnaDettaglio(item, opzioni = {}) {
       </section>
       <div id="dProposta"></div>
       ${fasce.join('')}
-      ${aperta ? formSvincolo(item, sv) : passoSemplice(item)}
-      <section class="sezione" id="dRegistra" aria-label="Registra intervento">
-        <div class="titolo-sezione"><h3>Registra intervento</h3><span class="meta">un clic e resta nello storico</span></div>
-        <label class="nascosto" for="dNota">Nota dell’intervento</label>
-        <textarea id="dNota" class="area" rows="2" placeholder="Nota facoltativa: es. cliente conferma indirizzo, contattata sede GLS…"></textarea>
+      <section class="sezione riquadro-interventi" id="dRegistra" aria-label="Registra intervento">
+        <div class="titolo-sezione"><h3>Registra intervento</h3><span class="meta">ogni azione entra nello storico unico</span></div>
         <div class="interventi">
-          ${[['CUSTOMER_MESSAGE', 'busta', 'Messaggio inviato'], ['CUSTOMER_CALLED', 'telefono', 'Cliente chiamato'], ['GLS_CONTACTED', 'pacco', 'GLS contattato'], ['NOTE', 'piu', 'Registra nota']]
-            .map(([k, i, t]) => `<button type="button" class="tasto" data-intervento="${k}">${ic(i)}${t}</button>`).join('')}
+          ${[['CUSTOMER_MESSAGE', 'busta', 'Messaggio cliente inviato'], ['CUSTOMER_CALLED', 'telefono', 'Cliente chiamato'], ['GLS_CONTACTED', 'pacco', 'GLS contattato'], ['NOTE', 'piu', 'Registra nota']]
+            .map(([k, i, t]) => `<button type="button" class="intervento" data-intervento="${k}"><span class="intervento-icona">${ic(i)}</span><span>${t}</span></button>`).join('')}
         </div>
+        <label class="nascosto" for="dNota">Nota dell’intervento</label>
+        <textarea id="dNota" class="area" rows="2" placeholder="Nota opzionale: es. cliente conferma indirizzo, contattata sede GLS…"></textarea>
       </section>
+      ${aperta ? formSvincolo(item, sv) : passoSemplice(item)}
       <section class="sezione con-linea" id="dPratica" aria-label="Stato della pratica">
         <div class="titolo-sezione"><h3>Stato della pratica</h3><span class="meta">lasciala aperta o chiudila a mano</span></div>
         <div class="segmenti" role="group" aria-label="Stato della pratica">
@@ -935,7 +934,6 @@ function collegaDettaglio(item, opzioni) {
     $('#sInvia').addEventListener('click', () => chiediConferma(item));
     $('#sFuori').addEventListener('click', () => registraAzione(item, 'STOCK_MANUAL_HANDLED', $('#dNota').value || ''));
   }
-  if (opzioni.vaiA === 'svincolo') setTimeout(() => { mostraNelPannello('#dSvincolo'); $('#sTipo')?.focus({ preventScroll: true }); }, 60);
   if (opzioni.proponi) proponi(item, opzioni.proponi);
 }
 

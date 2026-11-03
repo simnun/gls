@@ -310,9 +310,16 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .segmenti button + button { border-left: 1px solid var(--bordo); }
 .segmenti button[aria-pressed="true"] { background: var(--scuro); color: #fff; font-weight: 600; }
 .titolo-sezione { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.riquadro-interventi { gap: 8px; }
 .interventi { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.interventi .tasto { justify-content: flex-start; height: 44px; }
-.interventi .tasto svg { color: var(--testo-2); }
+.intervento {
+  border: 1px solid var(--bordo); border-radius: var(--raggio-grande); background: var(--superficie);
+  padding: 8px; display: flex; align-items: center; gap: 8px; text-align: left;
+  font-size: 14px; font-weight: 600; color: var(--testo); min-height: 48px;
+}
+.intervento:hover { background: #f8fbff; border-color: #84adf4; }
+.intervento-icona { width: 32px; height: 32px; border-radius: var(--raggio); background: var(--neutro-fondo); color: var(--testo-2); display: grid; place-items: center; flex: none; }
+.intervento-icona svg { width: 16px; height: 16px; }
 .proposta-tasti { margin-top: 8px; gap: 8px; }
 .tra { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
 
@@ -459,7 +466,7 @@ h1, h2, h3, b, strong { font-weight: 600; }
     border-top: 1px solid var(--bordo-chiaro); background: var(--superficie); flex: none;
   }
   .pannello-piede .tasto { flex: 1; height: 48px; padding: 0 8px; }
-  .campi, .dati { grid-template-columns: 1fr; }
+  .campi, .dati, .interventi { grid-template-columns: 1fr; }
   .campo.largo { grid-column: auto; }
   .avviso { bottom: 88px; }
   .storico li { grid-template-columns: 16px minmax(0, 1fr); }
