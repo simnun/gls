@@ -28,7 +28,7 @@ from core.assistente_ai import Collaboratore
 from core.db import Database
 from core.timezones import ROME
 from core.sync import SyncEngine
-from core.esporta import righe_spedizioni
+from core.esporta import righe_giacenze, righe_spedizioni
 from core.xlsx_export import build_xlsx
 
 CONFIG = get_config()
@@ -546,6 +546,27 @@ class AppHandler(BaseHTTPRequestHandler):
                 if not started:
                     return self._json({"ok": False, "message": "Sincronizzazione gia in corso"}, 409)
                 return self._json({"ok": True, "message": "Sincronizzazione avviata"}, 202)
+
+            if path == "/api/stocks/export.xlsx":
+                # Come per le spedizioni: le giacenze filtrate a schermo, in ordine.
+                body = self._read_json(limite=8 * 1024 * 1024)
+                voluti = []
+                for valore in body.get("id") if isinstance(body.get("id"), list) else []:
+                    try:
+                        voluti.append(int(valore))
+                    except (TypeError, ValueError):
+                        continue
+                per_id = {int(c["id"]): c for c in DB.stock_history()["cases"]}
+                casi = [per_id[i] for i in dict.fromkeys(voluti) if i in per_id]
+                intestazioni, righe = righe_giacenze(casi, self._links)
+                nome = "".join(ch for ch in str(body.get("nome") or "giacenze")
+                               if ch.isalnum() or ch in "-_")[:60] or "giacenze"
+                oggi = datetime.now(ROME).strftime("%Y-%m-%d")
+                return self._bytes(
+                    build_xlsx(intestazioni, righe, "Storico giacenze"),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    f"GLS_{nome}_{oggi}.xlsx",
+                )
 
             if path == "/api/shipments/export.xlsx":
                 # L'elenco viene dalla pagina, cosi' com'e' filtrato e ordinato a

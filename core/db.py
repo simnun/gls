@@ -2102,7 +2102,7 @@ class Database:
             rows = conn.execute(
                 """
                 SELECT sc.*, s.order_name, s.order_created_at, s.customer_name, s.customer_phone,
-                       s.city, s.province, s.total_amount, s.currency, s.is_cod, s.gls_status,
+                       s.customer_email, s.order_legacy_id, s.city, s.province, s.total_amount, s.currency, s.is_cod, s.gls_status,
                        s.gls_note, s.gls_event_at, s.workflow_status, s.last_operator_action,
                        s.last_operator_action_at, s.last_operator_name, s.closed
                 FROM stock_cases sc

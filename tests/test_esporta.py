@@ -95,3 +95,48 @@ class EsportaEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EsportaGiacenzeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self.tmp.name) / "db.sqlite3")
+        for numero, esito, stato in (("NG1", "RETURN", "CLOSED"), ("NG2", "", "OPEN")):
+            self.db.upsert_shipment({
+                "tracking_number": numero, "order_name": "#" + numero, "customer_name": "Cliente",
+                "customer_email": "c@example.com", "city": "Napoli", "province": "NA", "total_amount": 30.0,
+                "currency": "EUR", "payment_gateways": [], "is_cod": True, "gls_status": "Stato",
+                "gls_note": "", "severity": "CRITICAL", "category": "STORAGE", "closed": False,
+                "workflow_status": "NEW",
+            })
+        with self.db.connect() as conn:
+            conn.execute("""INSERT INTO stock_cases(tracking_number, entry_event_hash, entered_at, exited_at,
+                            outcome_category, outcome_state, outcome_event_at, status, created_at, updated_at)
+                            VALUES('NG1','h1','2026-10-01T09:00:00+02:00','2026-10-08T09:00:00+02:00','RETURN',
+                            'Rientrata','2026-10-08T09:00:00+02:00','CLOSED','2026-10-01T07:00:00Z','2026-10-08T07:00:00Z')""")
+            conn.execute("""INSERT INTO stock_cases(tracking_number, entry_event_hash, entered_at, status, created_at, updated_at)
+                            VALUES('NG2','h2','2026-11-10T09:00:00+01:00','OPEN','2026-11-10T08:00:00Z','2026-11-10T08:00:00Z')""")
+        self.db.add_operator_action("NG1", "NOTE", "Stato pratica: RESOLVED → NEW", "ok", "Daniela")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_colonne_della_giacenza(self):
+        from core.esporta import righe_giacenze
+        casi = {c["tracking_number"]: c for c in self.db.stock_history()["cases"]}
+        intestazioni, righe = righe_giacenze([casi["NG1"], casi["NG2"]])
+        rientrata, aperta = (dict(zip(intestazioni, r)) for r in righe)
+        self.assertEqual(rientrata["Esito"], "Rientrata")
+        self.assertEqual(rientrata["Giorni in giacenza"], 7)
+        self.assertEqual(rientrata["Entrata in giacenza"], datetime(2026, 10, 1, 9, 0))
+        self.assertEqual(rientrata["Email"], "c@example.com")
+        self.assertEqual(aperta["Esito"], "Ancora aperta")
+        self.assertEqual(aperta["Com'e' finita"], "Ancora ferma in sede")
+        self.assertIs(aperta["Contrassegno"], True)
+
+    def test_l_azione_di_sistema_e_scritta_in_parole(self):
+        from core.esporta import righe_giacenze
+        caso = next(c for c in self.db.stock_history()["cases"] if c["tracking_number"] == "NG1")
+        caso["latest_action"] = {"action_label": "Stato pratica: RESOLVED → NEW", "operator_name": "Sistema"}
+        intestazioni, righe = righe_giacenze([caso])
+        self.assertEqual(dict(zip(intestazioni, righe[0]))["Ultima azione"], "Stato pratica: Chiusa → Nuova")

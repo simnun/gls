@@ -506,17 +506,29 @@ function righeMostrate() {
 }
 
 async function esporta() {
-  const tasto = $('#esporta');
   const righe = righeMostrate();
   if (!righe.length) { avvisa('Non ci sono spedizioni da esportare con questi filtri.', true); return; }
   const nome = S.ricerca ? 'ricerca' : ({ ...Object.fromEntries(CODE.map(c => [c.id, c.nome])), ...ARCHIVIO }[S.coda] || 'spedizioni');
+  await scaricaExcel($('#esporta'), '/api/shipments/export.xlsx',
+    { tracking: righe.map(r => r.tracking_number), nome: nome.replace(/[^\p{L}\p{N}]+/gu, '-') },
+    plurale(righe.length, 'spedizione esportata', 'spedizioni esportate'));
+}
+async function esportaGiacenze() {
+  const casi = S.giacenzeMostrate || [];
+  if (!casi.length) { avvisa('Non ci sono giacenze da esportare con questi filtri.', true); return; }
+  const nome = `Giacenze-${etichettaPeriodo(S.filtriGiacenze.periodo)}`.replace(/[^\p{L}\p{N}]+/gu, '-');
+  await scaricaExcel($('#gEsporta'), '/api/stocks/export.xlsx', { id: casi.map(c => c.id), nome },
+    plurale(casi.length, 'giacenza esportata', 'giacenze esportate'));
+}
+// Chiede il file al server e lo fa scaricare, mostrando che sta lavorando.
+async function scaricaExcel(tasto, indirizzo, corpo, fatto) {
   tasto.disabled = true;
   const prima = tasto.innerHTML;
   tasto.lastChild.textContent = 'Preparo il file…';
   try {
-    const risposta = await fetch('/api/shipments/export.xlsx', {
+    const risposta = await fetch(indirizzo, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
-      body: JSON.stringify({ tracking: righe.map(r => r.tracking_number), nome: nome.replace(/[^\p{L}\p{N}]+/gu, '-') }),
+      body: JSON.stringify(corpo),
     });
     if (risposta.status === 401) { location.replace('/login'); return; }
     if (!risposta.ok) {
@@ -532,7 +544,7 @@ async function esporta() {
     link.download = nomeFile;
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 10000);
-    avvisa(`${plurale(righe.length, 'spedizione esportata', 'spedizioni esportate')} in Excel`);
+    avvisa(`${fatto} in Excel`);
   } catch (err) {
     avvisa(`Esportazione non riuscita: ${err.message}`, true);
   } finally {
@@ -1399,6 +1411,9 @@ function disegnaGiacenze() {
       <label class="pillola-scelta"><span class="nascosto">Gestite</span><select id="gGestite" class="${f.gestite ? 'attivo' : ''}">${opz('', f.gestite, 'Gestite: tutte')}${opz('si', f.gestite, 'Gestite dal team')}${opz('no', f.gestite, 'Senza azioni')}</select></label>
       <span class="ancora-data" id="gPeriodoBox" title="Data di entrata in giacenza"></span>
       <span class="conteggio">${plurale(casi.length, 'giacenza', 'giacenze')} nella vista</span>
+      <button type="button" class="tasto esporta" id="gEsporta" title="Scarica in Excel le giacenze mostrate, con tutti i loro dati">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 19h14"/></svg>Esporta
+      </button>
     </div>
     <section class="riquadro elenco elenco-giacenze" aria-label="Elenco giacenze">
       <div class="griglia-giacenze intestazione"><span>Esito</span><span>Ordine e cliente</span><span>In giacenza</span><span>Cosa abbiamo fatto</span><span>Com’è finita</span><span></span></div>
@@ -1413,6 +1428,8 @@ function disegnaGiacenze() {
   });
   $('#gEsito').addEventListener('change', (e) => { f.esito = e.target.value; disegnaGiacenze(); });
   $('#gGestite').addEventListener('change', (e) => { f.gestite = e.target.value; disegnaGiacenze(); });
+  S.giacenzeMostrate = casi;
+  $('#gEsporta').addEventListener('click', esportaGiacenze);
   montaSelettoreDate($('#gPeriodoBox'), { valore: f.periodo, onCambia: (v) => { f.periodo = v; disegnaGiacenze(); } });
   $$('.riga[data-tracking]', vista).forEach(el => {
     el.addEventListener('click', () => apriDettaglio(el.dataset.tracking, el));

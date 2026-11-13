@@ -8,6 +8,7 @@ in Excel si ordinano, si filtrano e si sommano.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any, Callable
 
@@ -104,6 +105,104 @@ COLONNE: list[tuple[str, Callable[[dict[str, Any]], Any]]] = [
     ("Monitorata dal", lambda s: _quando(s.get("first_seen_at"))),
     ("Conclusa", lambda s: bool(s.get("closed"))),
 ]
+
+
+ESITO_GIACENZA = {"aperta": "Ancora aperta", "consegnata": "Consegnata", "rientrata": "Rientrata",
+                  "ripartita": "Ripartita", "altro": "Da verificare"}
+_IN_MOVIMENTO = {"OUT_FOR_DELIVERY", "SCHEDULED", "IN_TRANSIT", "CORRESPONDENT", "SERVICE_AREA", "LINEHAUL_DELAY"}
+
+
+def esito_giacenza(caso: dict[str, Any]) -> str:
+    """Stessa regola dello storico a schermo."""
+    if caso.get("status") == "OPEN":
+        return "aperta"
+    esito = str(caso.get("outcome_category") or "").upper()
+    if esito == "DELIVERED":
+        return "consegnata"
+    if esito == "RETURN":
+        return "rientrata"
+    if esito in _IN_MOVIMENTO:
+        return "ripartita"
+    return "altro"
+
+
+def _giorni(caso: dict[str, Any]) -> int | str:
+    """Quanti giorni e' rimasta ferma: fino a oggi se e' ancora aperta."""
+    inizio = _quando(caso.get("entered_at") or caso.get("created_at"))
+    if not isinstance(inizio, datetime):
+        return ""
+    fine = _quando(caso.get("exited_at") or caso.get("outcome_event_at"))
+    if caso.get("status") == "OPEN" or not isinstance(fine, datetime):
+        fine = datetime.now(ROME).replace(tzinfo=None)
+    return max(0, (fine.date() - inizio.date()).days)
+
+
+def _azione(testo: Any) -> str:
+    """"Stato pratica: RESOLVED → NEW" con le parole della pagina."""
+    return re.sub(r"\b(" + "|".join(PRATICA) + r")\b", lambda m: PRATICA[m.group(1)], str(testo or ""))
+
+
+def _svincolo(caso: dict[str, Any]) -> dict[str, Any]:
+    return caso.get("latest_instruction") or {}
+
+
+def _ultima_azione(caso: dict[str, Any]) -> dict[str, Any]:
+    return caso.get("latest_action") or {}
+
+
+COLONNE_GIACENZE: list[tuple[str, Callable[[dict[str, Any]], Any]]] = [
+    ("Esito", lambda c: ESITO_GIACENZA[esito_giacenza(c)]),
+    ("Ordine", lambda c: c.get("order_name") or ""),
+    ("Data ordine", lambda c: _quando(c.get("order_created_at"))),
+    ("Tracking GLS", lambda c: c.get("tracking_number") or ""),
+    ("Cliente", lambda c: c.get("customer_name") or ""),
+    ("Email", lambda c: c.get("customer_email") or ""),
+    ("Telefono", lambda c: c.get("customer_phone") or ""),
+    ("Citta", lambda c: c.get("city") or ""),
+    ("Provincia", lambda c: c.get("province") or ""),
+    ("Importo", lambda c: _importo(c.get("total_amount"))),
+    ("Contrassegno", lambda c: bool(c.get("is_cod"))),
+    ("Entrata in giacenza", lambda c: _quando(c.get("entered_at") or c.get("created_at"))),
+    ("Stato all'entrata", lambda c: c.get("entry_state") or c.get("entry_note") or ""),
+    ("Sede GLS", lambda c: c.get("entry_location") or ""),
+    ("Giorni in giacenza", _giorni),
+    ("Uscita dalla giacenza", lambda c: _quando(c.get("exited_at"))),
+    ("Gestita dal team", lambda c: bool(c.get("handled"))),
+    ("Istruzione di svincolo", lambda c: _svincolo(c).get("release_label") or ""),
+    ("Svincolo inviato da", lambda c: _svincolo(c).get("operator_name") or ""),
+    ("Svincolo inviato il", lambda c: _quando(_svincolo(c).get("created_at"))),
+    ("Risposta GLS allo svincolo", lambda c: (("Accettato" if int(_svincolo(c).get("gls_success") or 0) == 1 else "Non accettato")
+                                              + (f": {_svincolo(c).get('gls_result')}" if _svincolo(c).get("gls_result") else ""))
+                                             if _svincolo(c) else ""),
+    ("Svincoli inviati", lambda c: len(c.get("release_requests") or [])),
+    ("Ultima azione", lambda c: _azione(_ultima_azione(c).get("action_label"))),
+    ("Azione di", lambda c: _ultima_azione(c).get("operator_name") or ""),
+    ("Azione il", lambda c: _quando(_ultima_azione(c).get("created_at"))),
+    ("Nota azione", lambda c: _ultima_azione(c).get("note") or ""),
+    ("Com'e' finita", lambda c: "Ancora ferma in sede" if c.get("status") == "OPEN" else (c.get("outcome_label") or "")),
+    ("Stato GLS all'uscita", lambda c: c.get("outcome_state") or ""),
+    ("Data esito", lambda c: _quando(c.get("outcome_event_at"))),
+    ("Stato GLS attuale", lambda c: c.get("gls_status") or ""),
+    ("Pratica", lambda c: "Chiusa" if c.get("closed") else PRATICA.get(c.get("workflow_status") or "", c.get("workflow_status") or "")),
+]
+
+
+def righe_giacenze(
+    casi: list[dict[str, Any]],
+    collegamenti: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> tuple[list[str], list[list[Any]]]:
+    """Intestazioni e righe dello storico giacenze, nell'ordine ricevuto."""
+    intestazioni = [nome for nome, _ in COLONNE_GIACENZE]
+    if collegamenti:
+        intestazioni += ["Link tracking GLS", "Link ordine Shopify"]
+    righe = []
+    for caso in casi:
+        riga = [estrai(caso) for _, estrai in COLONNE_GIACENZE]
+        if collegamenti:
+            link = collegamenti(caso) or {}
+            riga += [link.get("gls") or "", link.get("shopify") or ""]
+        righe.append(riga)
+    return intestazioni, righe
 
 
 def righe_spedizioni(
