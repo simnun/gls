@@ -320,6 +320,13 @@ class SyncEngine:
             # dalla coda qualunque cosa stia facendo il collo, tranne quando e'
             # fermo in giacenza e il rientro non e' ancora stato chiesto.
             annullate = self.db.chiudi_ordini_annullati()
+            # Una procedura di giacenza per ordine, sempre: le righe doppie
+            # rimaste da regole vecchie si uniscono qui, senza aspettare
+            # che qualcuno sistemi l'archivio.
+            try:
+                self.db.unisci_giacenze_doppie()
+            except Exception as exc:  # non deve fermare la sincronizzazione
+                print(f"Unione giacenze doppie non riuscita: {exc}")
             if sostituite or annullate:
                 self._set_progress(label=(
                     f"Chiuse {sostituite + len(annullate)} pratiche senza seguito "

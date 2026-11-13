@@ -934,6 +934,16 @@ def main() -> None:
         ENGINE.start_background_scheduler()
 
     server = ThreadingHTTPServer((CONFIG.app_host, CONFIG.app_port), AppHandler)
+    # A ogni avvio (cioe' a ogni deploy) lo storico giacenze si rimette in
+    # ordine da solo: una procedura per ordine. In sottofondo, per non
+    # ritardare la prima pagina.
+    def _unisci_giacenze() -> None:
+        try:
+            unite = DB.unisci_giacenze_doppie()
+            print(f"Giacenze doppie unite all'avvio: {unite}")
+        except Exception as exc:
+            print(f"Unione giacenze doppie non riuscita: {_senza_credenziali(exc)}")
+    threading.Thread(target=_unisci_giacenze, daemon=True).start()
     print("\nGLS Exception Monitor")
     print(f"Dashboard: http://{CONFIG.app_host}:{CONFIG.app_port}")
     print(f"Modalita: {'DEMO' if CONFIG.mock_mode else 'REALE'}")

@@ -159,7 +159,9 @@ class EsitoDellaGiacenzaTests(unittest.TestCase):
         self.assertEqual(casi[0]["outcome_category"], "RETURN")
         self.assertEqual(casi[0]["outcome_label"], "Rientro al mittente")
 
-    def test_una_seconda_giacenza_vera_resta_separata(self):
+    def test_tornata_in_sede_dopo_una_riconsegna_fallita_e_la_stessa_procedura(self):
+        # Una riga per ordine: il secondo passaggio in sede allunga la stessa
+        # procedura e si conta, non diventa una giacenza in piu'.
         self.spedizione("DELIVERED", "Consegnata.", "2026-10-08T10:00:00+02:00")
         casi = self.eventi(
             ("2026-10-01T10:00:00+02:00", "Spedizione in giacenza presso la sede GLS", "STORAGE"),
@@ -167,6 +169,72 @@ class EsitoDellaGiacenzaTests(unittest.TestCase):
             ("2026-10-03T15:00:00+02:00", SECONDO, "ABSENT"),
             ("2026-10-08T10:00:00+02:00", "Consegnata.", "DELIVERED"),
         )
-        self.assertEqual(len(casi), 2)
-        esiti = sorted(c["outcome_label"] for c in casi)
-        self.assertEqual(esiti, ["Consegnata", "Ripartita / riconsegna"])
+        self.assertEqual(len(casi), 1)
+        self.assertEqual(casi[0]["passaggi"], 2)
+        self.assertEqual(casi[0]["outcome_label"], "Consegnata")
+        self.assertTrue(casi[0]["entered_at"].startswith("2026-10-01"))
+
+
+class UnaRigaPerOrdineTests(unittest.TestCase):
+    """Righe doppie gia' nel database, scritte con le regole di prima."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self.tmp.name) / "db.sqlite3")
+        self.db.upsert_shipment({
+            "tracking_number": "NI7", "order_name": "#7", "customer_name": "Cliente", "city": "Sestu",
+            "province": "CA", "total_amount": 10.0, "currency": "EUR", "payment_gateways": [], "is_cod": False,
+            "gls_status": "Abbiamo restituito la spedizione al mittente", "gls_note": "", "severity": "NORMAL",
+            "category": "RETURN", "closed": True, "workflow_status": "RESOLVED",
+            "gls_event_at": "2026-10-05T12:34:00+02:00",
+        })
+        for i, (quando, stato, categoria) in enumerate((
+            ("2026-10-02T13:44:00+02:00", RIFIUTATA, "REFUSED"),
+            ("2026-10-05T00:00:00+02:00", "La spedizione e' stata creata dal mittente", "LABEL_CREATED"),
+            ("2026-10-05T12:34:00+02:00", GIACENZA, "STORAGE"),
+            ("2026-10-05T12:34:00+02:00", "Abbiamo restituito la spedizione al mittente", "RETURN"),
+        )):
+            self.db.insert_event({"tracking_number": "NI7", "event_hash": f"h{i}", "event_at": quando,
+                                  "state": stato, "category": categoria, "severity": "NORMAL"})
+        # Le due righe come le aveva scritte la regola vecchia, con lo
+        # svincolo attaccato alla prima.
+        with self.db.connect() as conn:
+            conn.execute("""INSERT INTO stock_cases(tracking_number, entry_event_hash, entered_at, exited_at,
+                            outcome_category, outcome_state, status, created_at, updated_at)
+                            VALUES('NI7','h0','2026-10-02T13:44:00+02:00','2026-10-05T00:00:00+02:00','LABEL_CREATED',
+                            'La spedizione e'' stata creata dal mittente','CLOSED','x','x')""")
+            conn.execute("""INSERT INTO stock_cases(tracking_number, entry_event_hash, entered_at, exited_at,
+                            outcome_category, outcome_state, status, created_at, updated_at)
+                            VALUES('NI7','h2','2026-10-05T12:34:00+02:00','2026-10-05T12:34:00+02:00','RETURN',
+                            'Abbiamo restituito la spedizione al mittente','CLOSED','x','x')""")
+            primo = conn.execute("SELECT id FROM stock_cases WHERE entry_event_hash='h0'").fetchone()["id"]
+            conn.execute("""INSERT INTO gls_release_requests(tracking_number, stock_case_id, release_type, release_label,
+                            operator_name, gls_success, created_at) VALUES('NI7',?,'3','Rientro al mittente','Daniela',1,
+                            '2026-10-03T09:00:00+00:00')""", (primo,))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lo_storico_mostra_una_riga_anche_prima_di_ogni_pulizia(self):
+        casi = self.db.stock_history()["cases"]
+        self.assertEqual(len(casi), 1)
+        caso = casi[0]
+        self.assertEqual(caso["outcome_label"], "Rientro al mittente")
+        self.assertEqual(caso["passaggi"], 2)
+        self.assertTrue(caso["handled"])
+        self.assertEqual(caso["latest_instruction"]["release_label"], "Rientro al mittente")
+        self.assertTrue(caso["entered_at"].startswith("2026-10-02"))
+        # Il dettaglio si apre da qualunque delle righe vecchie.
+        for i in caso["ids"]:
+            self.assertEqual(self.db.stock_case_detail(i)["tracking_number"], "NI7")
+
+    def test_la_pulizia_automatica_lascia_una_riga_nel_database(self):
+        self.assertEqual(self.db.unisci_giacenze_doppie(), 1)
+        with self.db.connect() as conn:
+            righe = [dict(r) for r in conn.execute("SELECT * FROM stock_cases WHERE tracking_number='NI7'")]
+            svincolo = conn.execute("SELECT stock_case_id FROM gls_release_requests").fetchone()[0]
+        self.assertEqual(len(righe), 1)
+        self.assertEqual(righe[0]["outcome_category"], "RETURN")
+        self.assertEqual(svincolo, righe[0]["id"])
+        # Una seconda passata non trova piu' niente da unire.
+        self.assertEqual(self.db.unisci_giacenze_doppie(), 0)

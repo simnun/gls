@@ -1026,7 +1026,8 @@ class Assistente:
                 numero = int(riga["totale"] or 0)
                 extra = {"riusciti": int(riga["riusciti"] or 0)}
             else:
-                chiave = "sc.id" if lettura.soggetto == "GIACENZE" else "s.tracking_number"
+                # Una giacenza e' una procedura per spedizione: si contano le spedizioni.
+                chiave = "s.tracking_number"
                 riga = conn.execute(
                     f"SELECT COUNT(DISTINCT {chiave}) AS totale {da} WHERE {where}", valori
                 ).fetchone()
@@ -1125,7 +1126,7 @@ class Assistente:
         dimensione = lettura.raggruppa or "categoria"
         chiave, titolo = self._espressione_gruppo(lettura, dimensione, colonna_data)
         conteggio = ("COUNT(*)" if lettura.soggetto in {"AZIONI", "SVINCOLI"}
-                     else f"COUNT(DISTINCT {'sc.id' if lettura.soggetto == 'GIACENZE' else 's.tracking_number'})")
+                     else "COUNT(DISTINCT s.tracking_number)")
         temporale = dimensione in {"giorno", "settimana", "mese"}
         ordine = "chiave ASC" if temporale else "quante DESC, chiave ASC"
         with self.db.connect() as conn:

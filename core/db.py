@@ -193,6 +193,7 @@ class Database:
                     outcome_state TEXT,
                     outcome_note TEXT,
                     outcome_event_at TEXT,
+                    passaggi INTEGER NOT NULL DEFAULT 1,
                     status TEXT NOT NULL DEFAULT 'OPEN',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -335,6 +336,8 @@ class Database:
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(stock_cases)").fetchall()}
         if cols and "outcome_event_at" not in cols:
             conn.execute("ALTER TABLE stock_cases ADD COLUMN outcome_event_at TEXT")
+        if cols and "passaggi" not in cols:
+            conn.execute("ALTER TABLE stock_cases ADD COLUMN passaggi INTEGER NOT NULL DEFAULT 1")
 
 
     @staticmethod
@@ -1263,7 +1266,7 @@ class Database:
                 "inconsistency_count": sum(1 for x in shipments if x.get("has_inconsistency")),
                 "total_active": sum(1 for x in shipments if not x.get("closed")),
                 "giacenze_totali": int((conn.execute(
-                    "SELECT COUNT(*) FROM stock_cases").fetchone() or [0])[0] or 0),
+                    "SELECT COUNT(DISTINCT tracking_number) FROM stock_cases").fetchone() or [0])[0] or 0),
                 "last_sync": self.latest_sync(),
             }
 
@@ -1683,6 +1686,17 @@ class Database:
                         "event_at": riga["gls_event_at"] or finale.get("event_at"),
                     }
 
+            # Una sola procedura per spedizione: dalla prima entrata in sede
+            # all'esito finale. Se il collo torna in sede dopo una riconsegna
+            # fallita la procedura continua, non ne nasce un'altra: chi lavora
+            # deve vedere una riga per ordine, con il conto dei passaggi.
+            if len(episodes) > 1:
+                ultimo = episodes[-1]
+                episodes = [{
+                    "entry": episodes[0]["entry"], "first_exit": ultimo.get("first_exit"),
+                    "final": ultimo.get("final"), "passaggi": len(episodes),
+                }]
+
             now = utcnow()
             for ep in episodes:
                 entry = ep["entry"]
@@ -1694,9 +1708,10 @@ class Database:
                     INSERT INTO stock_cases(
                         tracking_number, entry_event_hash, entered_at, entry_code, entry_state,
                         entry_note, entry_location, exit_event_hash, exited_at, outcome_category,
-                        outcome_state, outcome_note, outcome_event_at, status, created_at, updated_at
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        outcome_state, outcome_note, outcome_event_at, passaggi, status, created_at, updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(entry_event_hash) DO UPDATE SET
+                        passaggi=excluded.passaggi,
                         exited_at=excluded.exited_at,
                         exit_event_hash=excluded.exit_event_hash,
                         outcome_category=excluded.outcome_category,
@@ -1720,6 +1735,7 @@ class Database:
                         final_event.get("state") if final_event else None,
                         final_event.get("note") if final_event else None,
                         (final_event.get("event_at") or final_event.get("created_at")) if final_event else None,
+                        int(ep.get("passaggi") or 1),
                         status,
                         now,
                         now,
@@ -2223,9 +2239,11 @@ class Database:
 
             cases: list[dict[str, Any]] = []
             summary = {"total": 0, "open": 0, "handled": 0, "delivered": 0, "returned": 0, "other": 0}
-            for row in rows:
-                item = dict(row)
-                release_list = svincoli.get(item["id"], [])
+            for item in self._una_procedura_per_spedizione([dict(r) for r in rows]):
+                release_list = sorted(
+                    (r for i in item["ids"] for r in svincoli.get(i, [])),
+                    key=lambda r: str(r.get("created_at") or ""), reverse=True,
+                )
                 start = item.get("entered_at") or item.get("created_at")
                 end = item.get("exited_at")
                 # Stessa finestra di prima: dall'entrata in giacenza all'uscita,
@@ -2260,10 +2278,35 @@ class Database:
                 cases.append(item)
             return {"summary": summary, "cases": cases}
 
+    def _una_procedura_per_spedizione(self, righe: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Fonde le righe della stessa spedizione in una procedura sola.
+
+        La prima entrata apre la procedura, l'ultima riga dice com'e' finita;
+        i passaggi in sede si sommano. Ordine: entrata piu' recente in cima.
+        """
+        gruppi: dict[str, list[dict[str, Any]]] = {}
+        for riga in righe:
+            gruppi.setdefault(riga["tracking_number"], []).append(riga)
+        minimo = datetime.min.replace(tzinfo=timezone.utc)
+        procedure = []
+        for gruppo in gruppi.values():
+            gruppo.sort(key=lambda r: (self._parse_dt(r.get("entered_at") or r.get("created_at")) or minimo, r["id"]))
+            prima, ultima = gruppo[0], gruppo[-1]
+            item = dict(prima)
+            for campo in ("exit_event_hash", "exited_at", "outcome_category", "outcome_state",
+                          "outcome_note", "outcome_event_at", "status"):
+                item[campo] = ultima.get(campo)
+            item["ids"] = [r["id"] for r in gruppo]
+            item["passaggi"] = sum(int(r.get("passaggi") or 1) for r in gruppo)
+            procedure.append(item)
+        procedure.sort(key=lambda r: (self._parse_dt(r.get("entered_at") or r.get("created_at")) or minimo, r["id"]),
+                       reverse=True)
+        return procedure
+
     def stock_case_detail(self, case_id: int) -> dict[str, Any] | None:
         data = self.stock_history()
         for item in data["cases"]:
-            if int(item["id"]) == int(case_id):
+            if int(case_id) in item.get("ids", [item["id"]]):
                 tracking = item["tracking_number"]
                 with self.connect() as conn:
                     events = conn.execute(

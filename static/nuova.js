@@ -176,13 +176,14 @@ async function api(path, opzioni = {}) {
 }
 
 let timerAvviso = null;
-function avvisa(testo, errore = false) {
+// fisso: resta a schermo finche' un altro avviso non lo sostituisce.
+function avvisa(testo, errore = false, fisso = false, durata = 0) {
   const el = $('#avviso');
   el.textContent = testo;
   el.classList.toggle('errore', errore);
   el.classList.remove('nascosto-del-tutto');
   clearTimeout(timerAvviso);
-  timerAvviso = setTimeout(() => el.classList.add('nascosto-del-tutto'), errore ? 6000 : 3200);
+  if (!fisso) timerAvviso = setTimeout(() => el.classList.add('nascosto-del-tutto'), durata || (errore ? 8000 : 3200));
 }
 
 function memoria(chiaveM, valore) {
@@ -394,7 +395,7 @@ function disegnaMenuImpostazioni() {
 async function sistemaArchivio() {
   if (!confirm('Rileggo tutto l’archivio con le regole di oggi, chiudo le pratiche senza più seguito '
     + 'e unisco le giacenze comparse due volte.\n\nNon viene interrogato GLS e il lavoro degli operatori resta. Procedo?')) return;
-  avvisa('Sto sistemando l’archivio…');
+  avvisa('Sto sistemando l’archivio: può volerci qualche minuto, non chiudere la pagina…', false, true);
   try {
     const riclassifica = await api('/api/maintenance/reclassify', { method: 'POST', body: '{}' });
     const riparazioni = await api('/api/maintenance/ripristina-lavorazioni', { method: 'POST', body: '{}' });
@@ -404,7 +405,7 @@ async function sistemaArchivio() {
     if (riparazioni.ordini_annullati_chiusi) pezzi.push(`${riparazioni.ordini_annullati_chiusi} con ordine annullato chiuse`);
     if (riparazioni.pratiche_concluse) pezzi.push(`${riparazioni.pratiche_concluse} pratiche concluse`);
     if (riparazioni.ripristinate) pezzi.push(`${riparazioni.ripristinate} lavorazioni ripristinate`);
-    avvisa(pezzi.length ? `Archivio sistemato: ${pezzi.join(' · ')}` : 'Archivio già in ordine: niente da sistemare');
+    avvisa(pezzi.length ? `Archivio sistemato: ${pezzi.join(' · ')}` : 'Archivio già in ordine: niente da sistemare', false, false, 10000);
     S.giacenze = null; S.analisi = null;
     await caricaDati({ quieto: true });
     if (S.sezioneBase === 'giacenze') apriGiacenze();
@@ -1489,7 +1490,7 @@ function rigaGiacenza(c) {
   return `<div class="griglia-giacenze riga" data-tracking="${esc(c.tracking_number)}" tabindex="0">
     <span class="etichetta ${e.classe}">${e.nome}</span>
     <span class="colonna"><span class="forte taglia">${esc(c.order_name || c.tracking_number)} · ${esc(c.customer_name || 'Cliente')}</span><span class="piccolo">${esc([c.city, c.province].filter(Boolean).join(' · '))}</span></span>
-    <span class="colonna"><span>dal ${esc(giorno(inizio))}</span><span class="piccolo">${esc(durata)}</span></span>
+    <span class="colonna"><span>dal ${esc(giorno(inizio))}</span><span class="piccolo">${esc(durata)}${Number(c.passaggi || 1) > 1 ? ` · ${Number(c.passaggi)} passaggi in sede` : ''}</span></span>
     <span>${esc(fatto)}</span>
     <span class="meta">${esc(finita)}</span>
     <button type="button" class="freccia-apri" aria-label="Apri la pratica" tabindex="-1">${ic('avanti')}</button>

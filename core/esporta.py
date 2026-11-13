@@ -166,6 +166,7 @@ COLONNE_GIACENZE: list[tuple[str, Callable[[dict[str, Any]], Any]]] = [
     ("Stato all'entrata", lambda c: c.get("entry_state") or c.get("entry_note") or ""),
     ("Sede GLS", lambda c: c.get("entry_location") or ""),
     ("Giorni in giacenza", _giorni),
+    ("Passaggi in sede", lambda c: int(c.get("passaggi") or 1)),
     ("Uscita dalla giacenza", lambda c: _quando(c.get("exited_at"))),
     ("Gestita dal team", lambda c: bool(c.get("handled"))),
     ("Istruzione di svincolo", lambda c: _svincolo(c).get("release_label") or ""),
