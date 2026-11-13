@@ -1717,14 +1717,32 @@ class Database:
                     WHERE tracking_number=? AND entry_event_hash NOT IN ({segnaposto})""",
                 (tracking_number, *attuali),
             ).fetchall()
+            # Succede anche quando lo stesso evento arriva prima dal canale
+            # pubblico e poi da quello ufficiale con il codice: l'impronta cambia
+            # e la giacenza viene ricostruita. Gli svincoli gia' inviati passano
+            # alla giacenza ricostruita, che e' la stessa: tenere la riga vecchia
+            # la faceva comparire due volte nello storico.
+            ricostruite = [
+                (int(r["id"]), self._parse_dt(r["entered_at"]))
+                for r in conn.execute(
+                    f"""SELECT id, COALESCE(entered_at, created_at) AS entered_at FROM stock_cases
+                        WHERE tracking_number=? AND entry_event_hash IN ({segnaposto})""",
+                    (tracking_number, *attuali),
+                ).fetchall()
+            ] if attuali else []
             for orfana in orfane:
                 collegata = conn.execute(
                     "SELECT 1 FROM gls_release_requests WHERE stock_case_id=? LIMIT 1",
                     (orfana["id"],),
                 ).fetchone()
-                if collegata:
-                    # Porta con se' istruzioni gia' inviate a GLS: si chiude, non
-                    # si cancella, cosi' lo storico dello svincolo resta leggibile.
+                destinazione = self._giacenza_che_la_contiene(conn, orfana["id"], ricostruite) if collegata else None
+                if collegata and destinazione is not None:
+                    conn.execute("UPDATE gls_release_requests SET stock_case_id=? WHERE stock_case_id=?",
+                                 (destinazione, orfana["id"]))
+                    conn.execute("DELETE FROM stock_cases WHERE id=?", (orfana["id"],))
+                elif collegata:
+                    # Nessuna giacenza in cui confluire: si chiude, non si
+                    # cancella, cosi' lo storico dello svincolo resta leggibile.
                     conn.execute(
                         """UPDATE stock_cases
                            SET status='CLOSED', exited_at=COALESCE(exited_at,?),
@@ -1736,10 +1754,51 @@ class Database:
                 else:
                     conn.execute("DELETE FROM stock_cases WHERE id=?", (orfana["id"],))
 
+    def _giacenza_che_la_contiene(self, conn: Any, orfana_id: int,
+                                  ricostruite: list[tuple[int, datetime | None]]) -> int | None:
+        """La giacenza ricostruita in cui confluisce una riga rimasta orfana.
+
+        E' l'ultima entrata non dopo quella della riga orfana; se l'orfana e'
+        piu' vecchia di tutte, la prima.
+        """
+        if not ricostruite:
+            return None
+        riga = conn.execute("SELECT COALESCE(entered_at, created_at) AS entered_at FROM stock_cases WHERE id=?",
+                            (orfana_id,)).fetchone()
+        entrata = self._parse_dt(riga["entered_at"]) if riga else None
+        ordinate = sorted(ricostruite, key=lambda x: (x[1] is None, x[1] or datetime.min.replace(tzinfo=timezone.utc)))
+        if entrata is None:
+            return ordinate[0][0]
+        precedenti = [i for i, quando in ordinate if quando is not None and quando <= entrata]
+        return precedenti[-1] if precedenti else ordinate[0][0]
+
+    def unisci_giacenze_doppie(self) -> int:
+        """Ripulisce lo storico dalle giacenze comparse due volte.
+
+        Tocca solo le spedizioni con una riga rimasta orfana: chiusa come
+        "confluita" da una ricostruzione precedente, o con l'evento di entrata
+        che non esiste piu' perche' ha cambiato impronta. Restituisce quante
+        righe doppie sono sparite.
+        """
+        with self.connect() as conn:
+            prima = int(conn.execute("SELECT COUNT(*) FROM stock_cases").fetchone()[0] or 0)
+            sospette = [r["tracking_number"] for r in conn.execute(
+                """SELECT DISTINCT sc.tracking_number FROM stock_cases sc
+                   WHERE sc.outcome_state='Episodio confluito nella giacenza in corso'
+                      OR NOT EXISTS (SELECT 1 FROM events e WHERE e.event_hash=sc.entry_event_hash)"""
+            ).fetchall()]
+        for numero in sospette:
+            self.reconcile_stock_cases(numero)
+        with self.connect() as conn:
+            dopo = int(conn.execute("SELECT COUNT(*) FROM stock_cases").fetchone()[0] or 0)
+        return max(0, prima - dopo)
+
     def reconcile_all_stock_cases(self) -> int:
+        """Ricostruisce lo storico giacenze di ogni spedizione che ne ha avute."""
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT tracking_number FROM events WHERE category='STORAGE'"
+                " UNION SELECT DISTINCT tracking_number FROM stock_cases"
             ).fetchall()
         for row in rows:
             self.reconcile_stock_cases(row["tracking_number"])

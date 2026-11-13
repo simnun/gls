@@ -525,7 +525,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 ricalcolate = DB.ricalcola_ultima_attivita()
                 concluse = DB.concludi_pratiche_chiuse_senza_eventi()
                 annullate = DB.chiudi_ordini_annullati()
+                doppie = DB.unisci_giacenze_doppie()
                 return self._json({"ok": True, "ripristinate": len(ripristinate),
+                                   "giacenze_doppie_unite": doppie,
                                    "attivita_ricalcolate": ricalcolate,
                                    "pratiche_concluse": concluse,
                                    "ordini_annullati_chiusi": len(annullate),

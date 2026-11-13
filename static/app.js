@@ -1350,6 +1350,7 @@ async function sistemaArchivio() {
     if (riparazioni.ordini_annullati_chiusi) pezzi.push(`${riparazioni.ordini_annullati_chiusi} con ordine annullato chiuse`);
     if (riparazioni.pratiche_concluse) pezzi.push(`${riparazioni.pratiche_concluse} pratiche concluse`);
     if (riparazioni.ripristinate) pezzi.push(`${riparazioni.ripristinate} lavorazioni ripristinate`);
+    if (riparazioni.giacenze_doppie_unite) pezzi.push(`${riparazioni.giacenze_doppie_unite} giacenze doppie unite`);
     showToast(pezzi.length ? `Archivio sistemato: ${pezzi.join(' · ')}` : 'Archivio gia\u2019 in ordine: niente da sistemare');
     state.analisi = null;
     await loadDashboard({quiet: true});

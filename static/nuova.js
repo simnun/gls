@@ -379,12 +379,38 @@ function disegnaMenuImpostazioni() {
   $('#menuImpostazioni').innerHTML = `
     <a role="menuitem" href="/classica">Pagina classica ${ic('esterno')}</a>
     <button type="button" role="menuitem" id="voceAnalisi">Analisi del mese</button>
+    <button type="button" role="menuitem" id="voceArchivio">Sistema l’archivio</button>
     ${multi ? '<hr><button type="button" role="menuitem" id="voceEsci">Esci</button>' : ''}`;
   $('#voceAnalisi')?.addEventListener('click', () => { chiudiMenu(); apriAnalisi(); });
+  $('#voceArchivio')?.addEventListener('click', () => { chiudiMenu(); sistemaArchivio(); });
   $('#voceEsci')?.addEventListener('click', async () => {
     try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch {}
     location.replace('/login');
   });
+}
+
+// Le stesse riparazioni della pagina classica: rilegge l'archivio con le
+// regole di oggi, chiude cio' che non ha piu' seguito, unisce le giacenze doppie.
+async function sistemaArchivio() {
+  if (!confirm('Rileggo tutto l’archivio con le regole di oggi, chiudo le pratiche senza più seguito '
+    + 'e unisco le giacenze comparse due volte.\n\nNon viene interrogato GLS e il lavoro degli operatori resta. Procedo?')) return;
+  avvisa('Sto sistemando l’archivio…');
+  try {
+    const riclassifica = await api('/api/maintenance/reclassify', { method: 'POST', body: '{}' });
+    const riparazioni = await api('/api/maintenance/ripristina-lavorazioni', { method: 'POST', body: '{}' });
+    const pezzi = [];
+    if (riclassifica.spedizioni_aggiornate) pezzi.push(`${riclassifica.spedizioni_aggiornate} spedizioni riclassificate`);
+    if (riparazioni.giacenze_doppie_unite) pezzi.push(`${riparazioni.giacenze_doppie_unite} giacenze doppie unite`);
+    if (riparazioni.ordini_annullati_chiusi) pezzi.push(`${riparazioni.ordini_annullati_chiusi} con ordine annullato chiuse`);
+    if (riparazioni.pratiche_concluse) pezzi.push(`${riparazioni.pratiche_concluse} pratiche concluse`);
+    if (riparazioni.ripristinate) pezzi.push(`${riparazioni.ripristinate} lavorazioni ripristinate`);
+    avvisa(pezzi.length ? `Archivio sistemato: ${pezzi.join(' · ')}` : 'Archivio già in ordine: niente da sistemare');
+    S.giacenze = null; S.analisi = null;
+    await caricaDati({ quieto: true });
+    if (S.sezioneBase === 'giacenze') apriGiacenze();
+  } catch (err) {
+    avvisa(`Non sono riuscito a sistemare l’archivio: ${err.message}`, true);
+  }
 }
 
 function apriMenu(tasto, menu) {
