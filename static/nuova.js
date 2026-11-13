@@ -1315,10 +1315,22 @@ async function chiedi() {
     const righe = esito.righe || [];
     if (righe.length) {
       const quante = esito.totale_righe > righe.length ? `${righe.length} di ${esito.totale_righe}` : `${righe.length}`;
-      pezzi.push(`<button type="button" class="collegamento" data-mostra>Mostrami quali (${quante})</button>`);
+      pezzi.push(`<span class="in-linea"><button type="button" class="collegamento" data-mostra>Mostrami quali (${quante})</button>`
+        + `<button type="button" class="collegamento" data-copia>Copia i tracking</button></span>`);
     }
     bolla.classList.remove('attesa');
     bolla.innerHTML = pezzi.join('');
+    $('[data-copia]', bolla)?.addEventListener('click', async (e) => {
+      const tasto = e.currentTarget;
+      // Uno per riga: si incollano cosi' come sono in un foglio o in una mail.
+      const codici = [...new Set(righe.map(r => r.tracking_number).filter(Boolean))];
+      try {
+        await navigator.clipboard.writeText(codici.join('\n'));
+        avvisa(`${plurale(codici.length, 'tracking copiato', 'tracking copiati')}`);
+      } catch {
+        tasto.insertAdjacentHTML('afterend', `<textarea class="area" rows="6" readonly>${esc(codici.join('\n'))}</textarea>`);
+      }
+    });
     $('[data-mostra]', bolla)?.addEventListener('click', async () => {
       S.assistenteTracking = righe.map(r => r.tracking_number).filter(Boolean);
       chiudiPannelli();

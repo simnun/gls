@@ -34,7 +34,9 @@ from .timezones import ROME
 # Le stesse quattro categorie del tab "In consegna": il collo si sta muovendo.
 CATEGORIE_IN_CONSEGNA = ("OUT_FOR_DELIVERY", "SCHEDULED", "IN_TRANSIT", "CORRESPONDENT")
 IN_LAVORAZIONE = ("IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS")
-LIMITE_RIGHE = 200
+# Le righe dietro a una risposta, per «Mostrami quali» e «Copia i tracking»:
+# un mese di giacenze deve starci tutto, non fermarsi a meta'.
+LIMITE_RIGHE = 1000
 
 # ---------------------------------------------------------------------------
 # Vocabolario del dominio

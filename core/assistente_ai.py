@@ -124,12 +124,15 @@ Come compilare interroga_monitor:
 - intento: conta un numero, elenca le righe, raggruppa per una dimensione, dettaglio di una spedizione precisa.
 - adesso=true per la situazione di questo momento; in quel caso lascia il periodo vuoto.
 - periodo_da e periodo_a sono date AAAA-MM-GG; periodo_etichetta e' come lo chiameresti parlando.
-- percorso=true solo per le domande su che fine hanno fatto le giacenze: entrate, gestite, poi consegnate o rientrate.
+- percorso=true solo per le domande su che fine hanno fatto le giacenze: entrate, gestite, poi consegnate o rientrate. Da' i numeri del percorso, e l'elenco sotto la risposta comprende tutte le giacenze entrate.
+- Con soggetto GIACENZE, categorie e' l'esito della giacenza: RETURN le rientrate al mittente, DELIVERED le consegnate dopo la giacenza. Per elencare solo quelle (per esempio "dammi i tracking delle rientrate") usa soggetto GIACENZE, intento elenca, percorso=false, categorie con l'esito voluto e lo stesso periodo di prima.
 - data_su="ordine" solo se la domanda parla della data dell'ordine; altrimenti "evento".
 - solo_cod riguarda il pagamento in contrassegno; se invece il problema e' l'importo, usa la categoria COD_ISSUE.
 - operatore, provincia e citta': soltanto valori presenti negli elenchi qui sotto, altrimenti lascia vuoto.
 - gestite: "si" se il team e' gia' intervenuto, "no" se la pratica e' intatta.
 - Lascia vuoto tutto cio' che la domanda non chiede: ogni filtro in piu' e' una risposta piu' stretta del dovuto.
+
+Gli elenchi: lo strumento ti passa solo qualche esempio, ma l'operatore vede sotto la tua risposta l'elenco completo dell'ultima interrogazione, con i pulsanti «Mostrami quali» e «Copia i tracking». Quando ti chiedono un elenco, i tracking o gli ordini, interroga con i filtri esatti di quello che vogliono e rispondi con il numero e una frase che dice che l'elenco completo e' li' sotto. Non dire che non puoi dare l'elenco e non elencare a mano gli esempi.
 
 Nei risultati non ci sono i dati personali dei clienti: nome, email, telefono e indirizzo restano sul monitor e non ti vengono passati. Se servono, di' all'operatore di aprire l'elenco."""
 
@@ -349,6 +352,8 @@ def _risultato(calcolo: dict[str, Any], lettura: Lettura) -> dict[str, Any]:
         "conteggio": calcolo.get("numero"),
         "totale_trovate": calcolo.get("totale_righe", 0),
         "ho_cercato": _riassunto_filtri(lettura),
+        # Quante righe vede l'operatore sotto la risposta: di solito tutte.
+        "elenco_sotto_la_risposta": len(calcolo.get("righe") or []),
     }
     if calcolo.get("dettagli"):
         fuori["dettagli"] = calcolo["dettagli"]
