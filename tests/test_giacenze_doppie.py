@@ -92,3 +92,81 @@ class GiacenzeDoppieTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+RIFIUTATA = "La spedizione e' stata rifiutata. Ti invitiamo a contattare il mittente per programmare la riconsegna."
+SECONDO = ("Non siamo riusciti a raggiungerti al secondo tentativo di consegna, ti invitiamo a contattare "
+           "il mittente per programmare la riconsegna.")
+
+
+class EsitoDellaGiacenzaTests(unittest.TestCase):
+    """Le sequenze vere di GLS lette dallo storico di ottobre."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self.tmp.name) / "db.sqlite3")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def spedizione(self, categoria, stato, quando):
+        self.db.upsert_shipment({
+            "tracking_number": "NI9", "order_name": "#9", "customer_name": "Cliente", "city": "Olbia",
+            "province": "SS", "total_amount": 10.0, "currency": "EUR", "payment_gateways": [], "is_cod": False,
+            "gls_status": stato, "gls_note": "", "severity": "NORMAL", "category": categoria,
+            "closed": categoria in {"DELIVERED", "RETURN"}, "workflow_status": "NEW", "gls_event_at": quando,
+        })
+
+    def eventi(self, *sequenza):
+        for i, (quando, stato, categoria) in enumerate(sequenza):
+            self.db.insert_event({"tracking_number": "NI9", "event_hash": f"e{i}", "event_at": quando,
+                                  "state": stato, "category": categoria, "severity": "NORMAL"})
+        self.db.reconcile_stock_cases("NI9")
+        return self.db.stock_history()["cases"]
+
+    def test_il_motivo_ripetuto_insieme_al_rientro_non_e_una_seconda_giacenza(self):
+        self.spedizione("RETURN", "Abbiamo restituito la spedizione al mittente", "2026-10-05T13:07:00+02:00")
+        casi = self.eventi(
+            ("2026-10-01T10:29:00+02:00", RIFIUTATA, "REFUSED"),
+            ("2026-10-05T06:05:00+02:00", "Consegna prevista nel corso della giornata odierna.", "OUT_FOR_DELIVERY"),
+            ("2026-10-05T13:07:00+02:00", RIFIUTATA, "REFUSED"),
+            ("2026-10-05T13:07:00+02:00", "Abbiamo restituito la spedizione al mittente", "RETURN"),
+        )
+        self.assertEqual(len(casi), 1)
+        self.assertEqual(casi[0]["outcome_label"], "Rientro al mittente")
+
+    def test_il_ritiro_in_sede_pochi_minuti_dopo_e_la_fine_della_stessa_giacenza(self):
+        self.spedizione("DELIVERED", "Consegnata.", "2026-10-08T11:06:00+02:00")
+        casi = self.eventi(
+            ("2026-10-01T12:08:00+02:00", RIFIUTATA, "REFUSED"),
+            ("2026-10-06T00:00:00+02:00", "Arrivata nella Sede GLS locale.", "IN_TRANSIT"),
+            ("2026-10-08T11:02:00+02:00", "Disponibile per il ritiro in Sede GLS.", "STORAGE"),
+            ("2026-10-08T11:06:00+02:00", "Consegnata.", "DELIVERED"),
+        )
+        self.assertEqual(len(casi), 1)
+        self.assertEqual(casi[0]["outcome_label"], "Consegnata")
+
+    def test_dopo_la_spedizione_di_ritorno_l_esito_e_quello_della_spedizione(self):
+        # GLS crea la spedizione di ritorno e il rientro arriva solo sulla
+        # spedizione: la giacenza non deve restare "da verificare".
+        self.spedizione("RETURN", "Abbiamo restituito la spedizione al mittente", "2026-10-09T05:52:00+02:00")
+        casi = self.eventi(
+            ("2026-10-06T11:44:00+02:00", SECONDO, "ABSENT"),
+            ("2026-10-09T00:00:00+02:00", "La spedizione e' stata creata dal mittente, attendiamo che ci venga affidata.",
+             "LABEL_CREATED"),
+        )
+        self.assertEqual(len(casi), 1)
+        self.assertEqual(casi[0]["outcome_category"], "RETURN")
+        self.assertEqual(casi[0]["outcome_label"], "Rientro al mittente")
+
+    def test_una_seconda_giacenza_vera_resta_separata(self):
+        self.spedizione("DELIVERED", "Consegnata.", "2026-10-08T10:00:00+02:00")
+        casi = self.eventi(
+            ("2026-10-01T10:00:00+02:00", "Spedizione in giacenza presso la sede GLS", "STORAGE"),
+            ("2026-10-03T07:00:00+02:00", "Consegna prevista nel corso della giornata odierna.", "OUT_FOR_DELIVERY"),
+            ("2026-10-03T15:00:00+02:00", SECONDO, "ABSENT"),
+            ("2026-10-08T10:00:00+02:00", "Consegnata.", "DELIVERED"),
+        )
+        self.assertEqual(len(casi), 2)
+        esiti = sorted(c["outcome_label"] for c in casi)
+        self.assertEqual(esiti, ["Consegnata", "Ripartita / riconsegna"])

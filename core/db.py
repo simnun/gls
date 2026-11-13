@@ -1646,6 +1646,15 @@ class Database:
             if current is not None:
                 episodes.append(current)
 
+            # Quando GLS rimanda indietro o consegna il collo, ripete il motivo
+            # della giacenza ("rifiutata", "in giacenza...") insieme all'esito,
+            # nello stesso minuto; quando il cliente passa a ritirarlo in sede
+            # scrive "disponibile per il ritiro" pochi minuti prima di
+            # "consegnata". Non sono giacenze nuove ma la fine di quella prima:
+            # una "giacenza" che si chiude entro un'ora confluisce nella
+            # precedente, che ne prende l'esito.
+            episodes = self._unisci_giacenze_lampo(episodes)
+
             # Un esito finale chiude comunque la giacenza, anche se il singolo
             # evento non risulta fra le categorie di uscita. Succede quando un
             # evento e' stato registrato prima che le regole imparassero a
@@ -1653,7 +1662,7 @@ class Database:
             # momento, mentre la categoria della spedizione e' sempre attuale.
             if episodes:
                 riga = conn.execute(
-                    "SELECT category FROM shipments WHERE tracking_number=?",
+                    "SELECT category, gls_status, gls_note, gls_event_at FROM shipments WHERE tracking_number=?",
                     (tracking_number,),
                 ).fetchone()
                 categoria = (riga["category"] or "").upper() if riga else ""
@@ -1662,6 +1671,17 @@ class Database:
                     uscita = ultimo.get("final") or ultimo["entry"]
                     if uscita is not ultimo["entry"]:
                         ultimo["first_exit"] = uscita
+                # E com'e' finita l'ultima giacenza lo dice l'esito della
+                # spedizione, non un passaggio intermedio: dopo "rientro al
+                # mittente" GLS crea la spedizione di ritorno, e la giacenza
+                # restava "da verificare" anche a collo gia' restituito.
+                finale = ultimo.get("final") or {}
+                if (categoria in {"DELIVERED", "RETURN"} and ultimo.get("first_exit") is not None
+                        and (finale.get("category") or "").upper() not in {"DELIVERED", "RETURN"}):
+                    ultimo["final"] = {
+                        "category": categoria, "state": riga["gls_status"], "note": riga["gls_note"],
+                        "event_at": riga["gls_event_at"] or finale.get("event_at"),
+                    }
 
             now = utcnow()
             for ep in episodes:
@@ -1754,6 +1774,22 @@ class Database:
                 else:
                     conn.execute("DELETE FROM stock_cases WHERE id=?", (orfana["id"],))
 
+    LAMPO = timedelta(hours=1)
+
+    def _unisci_giacenze_lampo(self, episodi: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Fonde nella giacenza precedente quelle che si chiudono entro un'ora."""
+        tenuti: list[dict[str, Any]] = []
+        for episodio in episodi:
+            uscita = episodio.get("first_exit")
+            if tenuti and uscita is not None:
+                entrata = self._parse_dt(episodio["entry"].get("event_at") or episodio["entry"].get("created_at"))
+                fine = self._parse_dt(uscita.get("event_at") or uscita.get("created_at"))
+                if entrata and fine and timedelta(0) <= fine - entrata <= self.LAMPO:
+                    tenuti[-1]["final"] = episodio.get("final") or uscita
+                    continue
+            tenuti.append(episodio)
+        return tenuti
+
     def _giacenza_che_la_contiene(self, conn: Any, orfana_id: int,
                                   ricostruite: list[tuple[int, datetime | None]]) -> int | None:
         """La giacenza ricostruita in cui confluisce una riga rimasta orfana.
@@ -1784,8 +1820,13 @@ class Database:
             prima = int(conn.execute("SELECT COUNT(*) FROM stock_cases").fetchone()[0] or 0)
             sospette = [r["tracking_number"] for r in conn.execute(
                 """SELECT DISTINCT sc.tracking_number FROM stock_cases sc
+                   JOIN shipments s ON s.tracking_number=sc.tracking_number
                    WHERE sc.outcome_state='Episodio confluito nella giacenza in corso'
-                      OR NOT EXISTS (SELECT 1 FROM events e WHERE e.event_hash=sc.entry_event_hash)"""
+                      OR NOT EXISTS (SELECT 1 FROM events e WHERE e.event_hash=sc.entry_event_hash)
+                      OR (s.category IN ('DELIVERED','RETURN') AND sc.status='CLOSED'
+                          AND COALESCE(sc.outcome_category,'') NOT IN ('DELIVERED','RETURN'))
+                   UNION
+                   SELECT tracking_number FROM stock_cases GROUP BY tracking_number HAVING COUNT(*) > 1"""
             ).fetchall()]
         for numero in sospette:
             self.reconcile_stock_cases(numero)
