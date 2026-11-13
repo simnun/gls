@@ -35,10 +35,6 @@
       <button type="button" class="tasto-icona scuro" id="sincronizza" aria-label="Aggiorna adesso da Shopify e GLS" title="Aggiorna adesso da Shopify e GLS">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>
       </button>
-      <button type="button" class="tasto scuro solo-scrivania" id="apriChat">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l2.1 5.9L20 12l-5.9 2.1L12 20l-2.1-5.9L4 12l5.9-2.1L12 4z"/></svg>
-        Chiedi
-      </button>
       <span class="utente solo-scrivania" id="utente"></span>
     </div>
     <div class="avanzamento nascosto-del-tutto" id="avanzamento" role="status" aria-live="polite">
@@ -85,14 +81,7 @@
       <label class="pillola-scelta"><span class="nascosto">Stato GLS</span>
         <select id="filtroStato"><option value="">Stato GLS: tutti</option></select>
       </label>
-      <label class="pillola-scelta"><span class="nascosto">Periodo dell’ordine</span>
-        <select id="filtroPeriodo">
-          <option value="">Periodo: sempre</option>
-          <option value="1">Ordini di oggi</option>
-          <option value="7">Ultimi 7 giorni</option>
-          <option value="30">Ultimi 30 giorni</option>
-        </select>
-      </label>
+      <span class="ancora-data" id="filtroPeriodoBox" title="Data dell’ordine"></span>
       <label class="pillola-spunta"><input type="checkbox" id="filtroContrassegno"> Solo contrassegno</label>
       <button type="button" class="collegamento nascosto-del-tutto" id="azzeraFiltri">Togli i filtri</button>
       <span class="conteggio" id="conteggio"></span>
@@ -121,9 +110,12 @@
 
   <div class="velo nascosto-del-tutto" id="velo"></div>
   <aside class="pannello nascosto-del-tutto" id="dettaglio" aria-label="Pratica" tabindex="-1"></aside>
-  <aside class="pannello stretto nascosto-del-tutto" id="chat" aria-label="Chiedi al monitor" tabindex="-1"></aside>
   <aside class="pannello nascosto-del-tutto" id="analisi" aria-label="Analisi del mese" tabindex="-1"></aside>
   <aside class="pannello stretto nascosto-del-tutto" id="pannelloNovita" aria-label="Novità da GLS" tabindex="-1"></aside>
+  <button type="button" class="chat-fab" id="chatFab" aria-haspopup="dialog" aria-expanded="false" aria-label="Chiedi all’assistente" title="Chiedi all’assistente">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l2.1 5.9L20 12l-5.9 2.1L12 20l-2.1-5.9L4 12l5.9-2.1L12 4z"/></svg>
+  </button>
+  <section class="chat-box nascosto-del-tutto" id="chatBox" role="dialog" aria-label="Assistente del monitor"></section>
   <div class="avviso nascosto-del-tutto" id="avviso" role="status" aria-live="polite"></div>
 
   <script src="/nuova.js"></script>

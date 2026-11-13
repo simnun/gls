@@ -7,16 +7,16 @@ const S = {
   tutteCaricate: false,
   coda: 'verificare',          // coda o vista d'archivio mostrata
   ricerca: '',
-  filtri: { priorita: '', stato: '', periodo: '', cod: false },
+  filtri: { priorita: '', stato: '', periodo: {}, cod: false },
   scelte: new Set(),
   limite: 200,
   novita: null,
   novitaSet: new Set(),
   giacenze: null,
-  filtriGiacenze: { testo: '', esito: '', gestite: '', periodo: '30' },
+  filtriGiacenze: { testo: '', esito: '', gestite: '', periodo: { preset: '30g' } },
   analisi: null,
   assistenteTracking: [],
-  chatStoria: [],
+  chat: { vista: 'chat', corrente: null },
   dettaglio: null,
   sezione: 'coda',
   sezioneBase: 'coda',
@@ -93,6 +93,9 @@ const TRATTI = {
   su: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   giu: '<path d="M12 5v14M6 13l6 6 6-6"/>',
   pari: '<path d="M5 12h14"/>',
+  calendario: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  elenco: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
+  cestino: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   pacco: '<path d="M20.5 7.5l-8.5-4.5-8.5 4.5v9l8.5 4.5 8.5-4.5z"/><path d="M3.5 7.5l8.5 4.5 8.5-4.5M12 12v9"/>',
   vietato: '<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5l7 7"/>',
   piu: '<path d="M12 5v14M5 12h14"/>',
@@ -293,10 +296,7 @@ function filtra(righe) {
   if (f.priorita) out = out.filter(r => gravita(r) === f.priorita);
   if (f.stato) out = out.filter(r => String(r.gls_status || '').trim() === f.stato);
   if (f.cod) out = out.filter(r => r.is_cod);
-  if (f.periodo) {
-    const da = new Date(); da.setHours(0, 0, 0, 0); da.setDate(da.getDate() - (Number(f.periodo) - 1));
-    out = out.filter(r => { const d = data(r.order_created_at); return d && d >= da; });
-  }
+  if (periodoAttivo(f.periodo)) out = out.filter(r => nelPeriodo(f.periodo, r.order_created_at));
   return out;
 }
 function cercaTra(righe) {
@@ -305,7 +305,7 @@ function cercaTra(righe) {
   return righe.filter(r => [r.order_name, r.customer_name, r.customer_email, r.customer_phone, r.tracking_number,
     r.gls_status, r.gls_note, r.city, r.last_operator_name].some(v => String(v || '').toLowerCase().includes(q)));
 }
-const filtriAttivi = () => Boolean(S.filtri.priorita || S.filtri.stato || S.filtri.cod || S.filtri.periodo);
+const filtriAttivi = () => Boolean(S.filtri.priorita || S.filtri.stato || S.filtri.cod || periodoAttivo(S.filtri.periodo));
 
 function ordina(righe) {
   const archivio = ['consegnate', 'rientrate', 'tutte'].includes(S.coda);
@@ -424,7 +424,7 @@ function disegnaFiltroStati(base) {
 function segnaFiltri() {
   $('#filtroPriorita').classList.toggle('attivo', Boolean(S.filtri.priorita));
   $('#filtroStato').classList.toggle('attivo', Boolean(S.filtri.stato));
-  $('#filtroPeriodo').classList.toggle('attivo', Boolean(S.filtri.periodo));
+  montaPeriodoCoda();
   $('#azzeraFiltri').classList.toggle('nascosto-del-tutto', !filtriAttivi());
 }
 
@@ -562,8 +562,8 @@ async function caricaOggi() {
 }
 
 function azzeraFiltri() {
-  S.filtri = { priorita: '', stato: '', periodo: '', cod: false };
-  $('#filtroPriorita').value = ''; $('#filtroPeriodo').value = ''; $('#filtroContrassegno').checked = false;
+  S.filtri = { priorita: '', stato: '', periodo: {}, cod: false };
+  $('#filtroPriorita').value = ''; $('#filtroContrassegno').checked = false;
   disegna();
 }
 
@@ -692,10 +692,207 @@ function disegnaPannelloNovita() {
 }
 
 // ---------------------------------------------------------------------------
+// Selettore di date: scorciatoie a sinistra, calendario dal/al a destra
+// ---------------------------------------------------------------------------
+
+// Un periodo e' {preset: '30g'} (si ricalcola ogni giorno), {da, a} con date
+// AAAA-MM-GG, oppure {} per "da sempre".
+const PRESET_DATE = [
+  ['oggi', 'Oggi'], ['ieri', 'Ieri'], ['7g', 'Ultimi 7 giorni'], ['30g', 'Ultimi 30 giorni'],
+  ['90g', 'Ultimi 90 giorni'], ['settimana', 'Questa settimana'], ['settimana-scorsa', 'Settimana scorsa'],
+  ['mese', 'Questo mese'], ['mese-scorso', 'Mese scorso'], ['anno', 'Quest’anno'], ['sempre', 'Da sempre'],
+];
+const NOMI_GIORNI = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+
+function oggiZero() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+function piuGiorni(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function daChiave(k) { const [y, m, g] = String(k).split('-').map(Number); return new Date(y, m - 1, g); }
+function intervalloPreset(id) {
+  const o = oggiZero();
+  const lunedi = piuGiorni(o, -((o.getDay() + 6) % 7));
+  switch (id) {
+    case 'oggi': return [o, o];
+    case 'ieri': { const i = piuGiorni(o, -1); return [i, i]; }
+    case '7g': return [piuGiorni(o, -6), o];
+    case '30g': return [piuGiorni(o, -29), o];
+    case '90g': return [piuGiorni(o, -89), o];
+    case 'settimana': return [lunedi, o];
+    case 'settimana-scorsa': return [piuGiorni(lunedi, -7), piuGiorni(lunedi, -1)];
+    case 'mese': return [new Date(o.getFullYear(), o.getMonth(), 1), o];
+    case 'mese-scorso': return [new Date(o.getFullYear(), o.getMonth() - 1, 1), new Date(o.getFullYear(), o.getMonth(), 0)];
+    case 'anno': return [new Date(o.getFullYear(), 0, 1), o];
+    default: return [null, null];
+  }
+}
+function intervallo(v) {
+  if (!v) return ['', ''];
+  if (v.preset) { const [d, a] = intervalloPreset(v.preset); return [d ? chiave(d) : '', a ? chiave(a) : '']; }
+  return [v.da || '', v.a || v.da || ''];
+}
+const periodoAttivo = (v) => Boolean(v && ((v.preset && v.preset !== 'sempre') || v.da));
+function etichettaPeriodo(v) {
+  if (!periodoAttivo(v)) return 'Da sempre';
+  if (v.preset) return (PRESET_DATE.find(p => p[0] === v.preset) || [])[1] || '';
+  const [d, a] = intervallo(v);
+  if (d === a) return giorno(daChiave(d), true);
+  const stessoAnno = d.slice(0, 4) === a.slice(0, 4);
+  return `${giorno(daChiave(d), !stessoAnno)} – ${giorno(daChiave(a), true)}`;
+}
+function nelPeriodo(v, quando) {
+  const [da, a] = intervallo(v);
+  if (!da && !a) return true;
+  const d = data(quando); if (!d) return false;
+  const k = chiave(d);
+  return (!da || k >= da) && (!a || k <= a);
+}
+
+function montaSelettoreDate(contenitore, { valore, onCambia, prefisso = '' }) {
+  if (!contenitore) return;
+  contenitore.innerHTML = `<button type="button" class="pillola-data ${periodoAttivo(valore) ? 'attivo' : ''}" aria-haspopup="dialog" aria-expanded="false">`
+    + `${ic('calendario')}<span>${esc(prefisso)}${esc(etichettaPeriodo(valore))}</span>`
+    + `<svg class="giu" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`;
+  const tasto = contenitore.firstElementChild;
+  tasto.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (S.selettore && S.selettore.tasto === tasto) return chiudiSelettoreDate();
+    apriSelettoreDate(tasto, valore, onCambia);
+  });
+}
+function montaPeriodoCoda() {
+  montaSelettoreDate($('#filtroPeriodoBox'), {
+    valore: S.filtri.periodo, prefisso: 'Ordini: ',
+    onCambia: (v) => { S.filtri.periodo = v; disegna(); },
+  });
+}
+
+function apriSelettoreDate(tasto, valore, onCambia) {
+  chiudiSelettoreDate();
+  const [da, a] = intervallo(valore);
+  const fine = a ? daChiave(a) : oggiZero();
+  S.selettore = {
+    tasto, onCambia, preset: periodoAttivo(valore) ? (valore.preset || '') : 'sempre', da, a,
+    // A destra il mese in cui finisce il periodo, a sinistra quello prima.
+    mese: new Date(fine.getFullYear(), fine.getMonth() - 1, 1),
+  };
+  const box = document.createElement('div');
+  box.className = 'selettore-date';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-label', 'Scegli il periodo');
+  // Ogni clic ridisegna il contenuto: senza questo, il clic arriverebbe al
+  // documento da un elemento gia' rimosso e chiuderebbe il selettore.
+  box.addEventListener('click', (e) => e.stopPropagation());
+  document.body.appendChild(box);
+  S.selettore.box = box;
+  tasto.setAttribute('aria-expanded', 'true');
+  disegnaSelettoreDate();
+  posizionaSelettoreDate();
+  $('[aria-pressed="true"]', box)?.focus({ preventScroll: true });
+}
+function posizionaSelettoreDate() {
+  const st = S.selettore; if (!st) return;
+  if (matchMedia('(max-width: 760px)').matches) return;   // sul telefono e' un foglio dal basso
+  const r = st.tasto.getBoundingClientRect();
+  const larghezza = st.box.offsetWidth;
+  st.box.style.left = `${Math.max(16, Math.min(r.left, innerWidth - larghezza - 16))}px`;
+  const sotto = r.bottom + 8;
+  const alto = st.box.offsetHeight;
+  st.box.style.top = `${sotto + alto > innerHeight - 16 ? Math.max(16, r.top - alto - 8) : sotto}px`;
+}
+function chiudiSelettoreDate(rimettiFuoco = false) {
+  const st = S.selettore; if (!st) return;
+  st.box.remove();
+  st.tasto.setAttribute('aria-expanded', 'false');
+  S.selettore = null;
+  if (rimettiFuoco && document.contains(st.tasto)) st.tasto.focus();
+}
+
+function meseHtml(primo, st) {
+  const oggi = chiave(oggiZero());
+  const vuoti = (primo.getDay() + 6) % 7;
+  const giorni = new Date(primo.getFullYear(), primo.getMonth() + 1, 0).getDate();
+  const celle = [];
+  for (let i = 0; i < vuoti; i++) celle.push('<span></span>');
+  for (let g = 1; g <= giorni; g++) {
+    const k = chiave(new Date(primo.getFullYear(), primo.getMonth(), g));
+    const fine = st.a || st.da;
+    const classi = [
+      k === oggi ? 'oggi' : '',
+      st.da && k === st.da ? 'inizio' : '',
+      fine && k === fine ? 'fine' : '',
+      st.da && fine && k > st.da && k < fine ? 'dentro' : '',
+    ].filter(Boolean).join(' ');
+    celle.push(`<button type="button" class="sd-giorno ${classi}" data-giorno="${k}" ${k > oggi ? 'disabled' : ''}`
+      + ` aria-pressed="${Boolean(classi.match(/inizio|fine|dentro/))}" aria-label="${g} ${MESI[primo.getMonth()]} ${primo.getFullYear()}">${g}</button>`);
+  }
+  return `<div class="sd-mese"><div class="sd-titolo-mese">${MESI[primo.getMonth()]} ${primo.getFullYear()}</div>
+    <div class="sd-griglia">${NOMI_GIORNI.map(n => `<span class="sd-nome">${n}</span>`).join('')}${celle.join('')}</div></div>`;
+}
+
+function disegnaSelettoreDate() {
+  const st = S.selettore; if (!st) return;
+  const destro = new Date(st.mese.getFullYear(), st.mese.getMonth() + 1, 1);
+  st.box.innerHTML = `
+    <div class="sd-corpo">
+      <div class="sd-scorciatoie" role="group" aria-label="Periodi rapidi">
+        ${PRESET_DATE.map(([id, nome]) => `<button type="button" data-preset="${id}" aria-pressed="${st.preset === id}">${nome}</button>`).join('')}
+      </div>
+      <div class="sd-destra">
+        <div class="sd-campi">
+          <label class="campo">Dal<input type="date" id="sdDa" value="${st.da}" max="${chiave(oggiZero())}"></label>
+          <span class="sd-freccia" aria-hidden="true">${ic('freccia')}</span>
+          <label class="campo">Al<input type="date" id="sdA" value="${st.a}" max="${chiave(oggiZero())}"></label>
+        </div>
+        <div class="sd-mesi">
+          <button type="button" class="tasto-icona sd-prec" aria-label="Mese precedente">${ic('indietro')}</button>
+          <div class="sd-sinistro">${meseHtml(st.mese, st)}</div>
+          <div>${meseHtml(destro, st)}</div>
+          <button type="button" class="tasto-icona sd-succ" aria-label="Mese successivo">${ic('avanti')}</button>
+        </div>
+      </div>
+    </div>
+    <div class="sd-piede">
+      <span class="meta">${st.da ? (st.a ? '' : 'Ora scegli il giorno di fine, o applica solo questo giorno.') : 'Scegli un periodo rapido o il primo giorno sul calendario.'}</span>
+      <button type="button" class="tasto" data-sd="annulla">Annulla</button>
+      <button type="button" class="tasto primario" data-sd="applica">Applica</button>
+    </div>`;
+  const box = st.box;
+  $$('[data-preset]', box).forEach(b => b.addEventListener('click', () => {
+    st.preset = b.dataset.preset;
+    [st.da, st.a] = intervallo(st.preset === 'sempre' ? {} : { preset: st.preset });
+    const fine = st.a ? daChiave(st.a) : oggiZero();
+    st.mese = new Date(fine.getFullYear(), fine.getMonth() - 1, 1);
+    disegnaSelettoreDate();
+    $(`[data-preset="${st.preset}"]`, box)?.focus({ preventScroll: true });
+  }));
+  $$('.sd-giorno', box).forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.giorno;
+    st.preset = '';
+    if (!st.da || st.a) { st.da = k; st.a = ''; }
+    else if (k < st.da) { st.a = st.da; st.da = k; }
+    else st.a = k;
+    disegnaSelettoreDate();
+    $(`[data-giorno="${k}"]`, box)?.focus({ preventScroll: true });
+  }));
+  $('#sdDa', box).addEventListener('change', (e) => { st.preset = ''; st.da = e.target.value; if (st.a && st.da > st.a) st.a = st.da; disegnaSelettoreDate(); });
+  $('#sdA', box).addEventListener('change', (e) => { st.preset = ''; st.a = e.target.value; if (st.da && st.a < st.da) [st.da, st.a] = [st.a, st.da]; disegnaSelettoreDate(); });
+  $('.sd-prec', box).addEventListener('click', () => { st.mese = new Date(st.mese.getFullYear(), st.mese.getMonth() - 1, 1); disegnaSelettoreDate(); });
+  $('.sd-succ', box).addEventListener('click', () => { st.mese = new Date(st.mese.getFullYear(), st.mese.getMonth() + 1, 1); disegnaSelettoreDate(); });
+  $('[data-sd="annulla"]', box).addEventListener('click', () => chiudiSelettoreDate(true));
+  $('[data-sd="applica"]', box).addEventListener('click', () => {
+    let valore = {};
+    if (st.preset && st.preset !== 'sempre') valore = { preset: st.preset };
+    else if (st.da) valore = { da: st.da, a: st.a || st.da };
+    const cambia = st.onCambia;
+    chiudiSelettoreDate();
+    cambia(valore);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Pannelli
 // ---------------------------------------------------------------------------
 
-const PANNELLI = ['dettaglio', 'chat', 'analisi', 'pannelloNovita'];
+const PANNELLI = ['dettaglio', 'analisi', 'pannelloNovita'];
 function apriPannello(id, opener) {
   PANNELLI.forEach(p => { if (p !== id) $('#' + p).classList.add('nascosto-del-tutto'); });
   S.opener = opener || document.activeElement;
@@ -889,7 +1086,7 @@ function storico(item) {
   }));
   const umane = (item.operator_actions || []).filter(a => (a.operator_name || '').trim().toLowerCase() !== 'sistema');
   const ultimaId = umane.length ? umane[0].id : null;
-  const azioni = umane.map(a => ({ quando: a.created_at, team: true, chi: a.operator_name || 'Operatore', testo: a.action_label || a.action_type, nota: a.note || '', id: a.id }));
+  const azioni = umane.map(a => ({ quando: a.created_at, team: true, chi: a.operator_name || 'Operatore', testo: etichettaAzione(a.action_label || a.action_type), nota: a.note || '', id: a.id }));
   const svincoliStorico = (item.stock_cases || []).flatMap(sc => sc.release_requests || []).map(r => ({
     quando: r.created_at, team: true, chi: r.operator_name || 'Operatore',
     testo: `Svincolo: ${r.release_label}`, nota: Number(r.gls_success) === 1 ? 'Ricevuto da GLS' : `Non accettato da GLS${r.gls_result ? ': ' + r.gls_result : ''}`,
@@ -1124,14 +1321,11 @@ function disegnaGiacenze() {
   if (!S.giacenze) return;
   const f = S.filtriGiacenze;
   let casi = S.giacenze.cases || [];
-  if (f.periodo) {
-    const da = new Date(); da.setHours(0, 0, 0, 0); da.setDate(da.getDate() - Number(f.periodo));
-    casi = casi.filter(c => { const d = data(c.entered_at || c.created_at); return d && d >= da; });
-  }
-  const nelPeriodo = casi;
+  if (periodoAttivo(f.periodo)) casi = casi.filter(c => nelPeriodo(f.periodo, c.entered_at || c.created_at));
+  const delPeriodo = casi;
   const conti = { aperta: 0, consegnata: 0, rientrata: 0, ripartita: 0, altro: 0 };
-  nelPeriodo.forEach(c => { conti[esitoGiacenza(c)] += 1; });
-  const gestite = nelPeriodo.filter(c => c.handled).length;
+  delPeriodo.forEach(c => { conti[esitoGiacenza(c)] += 1; });
+  const gestite = delPeriodo.filter(c => c.handled).length;
   if (f.esito) casi = casi.filter(c => esitoGiacenza(c) === f.esito);
   if (f.gestite) casi = casi.filter(c => (f.gestite === 'si') === Boolean(c.handled));
   if (f.testo) {
@@ -1140,7 +1334,7 @@ function disegnaGiacenze() {
   }
   casi = casi.slice().sort((a, b) => (esitoGiacenza(a) === 'aperta' ? 0 : 1) - (esitoGiacenza(b) === 'aperta' ? 0 : 1)
     || (data(b.entered_at || b.created_at)?.getTime() || 0) - (data(a.entered_at || a.created_at)?.getTime() || 0));
-  const periodoTesto = f.periodo ? `Ultimi ${f.periodo} giorni` : 'Da sempre';
+  const periodoTesto = etichettaPeriodo(f.periodo);
   const ordineEsiti = ['consegnata', 'rientrata', 'ripartita', 'aperta', 'altro'];
   const opz = (val, attuale, testo) => `<option value="${val}" ${val === attuale ? 'selected' : ''}>${testo}</option>`;
 
@@ -1151,7 +1345,7 @@ function disegnaGiacenze() {
       <p>Ogni volta che un collo si è fermato in sede GLS, e com’è finita. ${esc(periodoTesto)}.</p>
     </div>
     <section class="riquadro esiti" aria-label="Com’è finita">
-      <div class="in-linea"><span class="grande">${nelPeriodo.length}</span><span class="meta">${nelPeriodo.length === 1 ? 'giacenza' : 'giacenze'} · ${gestite} gestite dal team</span></div>
+      <div class="in-linea"><span class="grande">${delPeriodo.length}</span><span class="meta">${delPeriodo.length === 1 ? 'giacenza' : 'giacenze'} · ${gestite} gestite dal team</span></div>
       <div class="barra-esiti" role="img" aria-label="${ordineEsiti.filter(k => conti[k]).map(k => `${conti[k]} ${ESITI[k].plurale}`).join(', ')}">
         ${ordineEsiti.filter(k => conti[k]).map(k => `<span style="flex:${conti[k]};background:${ESITI[k].colore}"></span>`).join('')}
       </div>
@@ -1161,7 +1355,7 @@ function disegnaGiacenze() {
       <div class="cerca-chiara"><label for="gCerca" class="nascosto">Cerca fra le giacenze</label>${ic('cerca')}<input id="gCerca" type="search" placeholder="Ordine, cliente o tracking" value="${esc(f.testo)}"></div>
       <label class="pillola-scelta"><span class="nascosto">Esito</span><select id="gEsito" class="${f.esito ? 'attivo' : ''}">${opz('', f.esito, 'Esito: tutti')}${ordineEsiti.map(k => opz(k, f.esito, ESITI[k].nome)).join('')}</select></label>
       <label class="pillola-scelta"><span class="nascosto">Gestite</span><select id="gGestite" class="${f.gestite ? 'attivo' : ''}">${opz('', f.gestite, 'Gestite: tutte')}${opz('si', f.gestite, 'Gestite dal team')}${opz('no', f.gestite, 'Senza azioni')}</select></label>
-      <label class="pillola-scelta"><span class="nascosto">Periodo</span><select id="gPeriodo">${opz('7', f.periodo, 'Ultimi 7 giorni')}${opz('30', f.periodo, 'Ultimi 30 giorni')}${opz('90', f.periodo, 'Ultimi 90 giorni')}${opz('', f.periodo, 'Da sempre')}</select></label>
+      <span class="ancora-data" id="gPeriodoBox" title="Data di entrata in giacenza"></span>
       <span class="conteggio">${plurale(casi.length, 'giacenza', 'giacenze')} nella vista</span>
     </div>
     <section class="riquadro elenco elenco-giacenze" aria-label="Elenco giacenze">
@@ -1177,11 +1371,19 @@ function disegnaGiacenze() {
   });
   $('#gEsito').addEventListener('change', (e) => { f.esito = e.target.value; disegnaGiacenze(); });
   $('#gGestite').addEventListener('change', (e) => { f.gestite = e.target.value; disegnaGiacenze(); });
-  $('#gPeriodo').addEventListener('change', (e) => { f.periodo = e.target.value; disegnaGiacenze(); });
+  montaSelettoreDate($('#gPeriodoBox'), { valore: f.periodo, onCambia: (v) => { f.periodo = v; disegnaGiacenze(); } });
   $$('.riga[data-tracking]', vista).forEach(el => {
     el.addEventListener('click', () => apriDettaglio(el.dataset.tracking, el));
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter') apriDettaglio(el.dataset.tracking, el); });
   });
+}
+
+// "Stato pratica: RESOLVED → NEW" e' scritto dal sistema con i codici
+// interni: a schermo vanno le stesse parole della pagina.
+const NOMI_STATO = { NEW: 'Nuova', IN_PROGRESS: 'In lavorazione', WAITING_CUSTOMER: 'In lavorazione',
+  WAITING_GLS: 'In lavorazione', RESOLVED: 'Chiusa', IGNORED: 'Chiusa' };
+function etichettaAzione(testo) {
+  return String(testo || '').replace(/\b(NEW|IN_PROGRESS|WAITING_CUSTOMER|WAITING_GLS|RESOLVED|IGNORED)\b/g, (k) => NOMI_STATO[k]);
 }
 
 function rigaGiacenza(c) {
@@ -1197,7 +1399,7 @@ function rigaGiacenza(c) {
   const istr = c.latest_instruction; const az = c.latest_action;
   let fatto = 'Nessuna azione';
   if (istr) fatto = `Svincolo inviato da ${istr.operator_name || 'operatore'}: ${String(istr.release_label || '').toLowerCase()}${Number(istr.gls_success) === 1 ? '' : ' · non accettato da GLS'}`;
-  else if (az) fatto = `${az.action_label || 'Azione'} · ${az.operator_name || 'operatore'}`;
+  else if (az) fatto = `${etichettaAzione(az.action_label) || 'Azione'} · ${az.operator_name || 'operatore'}`;
   const finita = k === 'aperta' ? 'Ancora ferma in sede' : `${c.outcome_label || e.nome}${fine ? ` il ${giorno(fine)}` : ''}`;
   return `<div class="griglia-giacenze riga" data-tracking="${esc(c.tracking_number)}" tabindex="0">
     <span class="etichetta ${e.classe}">${e.nome}</span>
@@ -1267,80 +1469,200 @@ function disegnaGrafico(box, serie) {
 }
 
 // ---------------------------------------------------------------------------
-// Chiedi al monitor
+// Assistente: box in basso a destra, con le conversazioni salvate
 // ---------------------------------------------------------------------------
 
-function apriChat(opener) {
-  const p = $('#chat');
-  if (!p.dataset.pronta) {
-    p.innerHTML = `<div class="pannello-testa"><div class="pannello-titolo"><div><h2>Chiedi al monitor</h2><span class="meta">Risponde leggendo i dati delle spedizioni</span></div>
-      <button type="button" class="tasto-icona" id="chatNuova" aria-label="Nuova conversazione" title="Nuova conversazione">${ic('piu')}</button>${tastoChiudi()}</div></div>
-      <div class="chat-registro" id="chatRegistro" aria-live="polite"></div>
-      <form class="chat-scrivi" id="chatForm"><label for="chatDomanda" class="nascosto">La tua domanda</label>
-        <textarea id="chatDomanda" rows="1" placeholder="Scrivi una domanda"></textarea>
-        <button type="submit" class="tasto-icona" aria-label="Invia">${ic('invia')}</button></form>`;
-    p.dataset.pronta = '1';
-    $('.chiudi-pannello', p).addEventListener('click', chiudiPannelli);
-    $('#chatNuova').addEventListener('click', () => { S.chatStoria = []; disegnaChatVuota(); $('#chatDomanda').focus(); });
-    const area = $('#chatDomanda');
-    area.addEventListener('input', () => { area.style.height = 'auto'; area.style.height = `${Math.min(160, area.scrollHeight)}px`; });
-    area.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#chatForm').requestSubmit(); } });
-    $('#chatForm').addEventListener('submit', (e) => { e.preventDefault(); chiedi(); });
-    disegnaChatVuota();
+// Le conversazioni restano in questo browser, come nella chat di un'app:
+// domande, risposte e i tracking dietro a ogni risposta, mai dati dei clienti.
+const CHIAVE_CHAT = 'glsChatConversazioni';
+const MAX_CONVERSAZIONI = 30;
+
+// In memoria la copia di lavoro; nel browser quella che resta. Se il browser
+// non lascia salvare (finestra privata) la chat funziona lo stesso, solo che
+// le conversazioni spariscono chiudendo la pagina.
+let CONVERSAZIONI = null;
+function conversazioni() {
+  if (CONVERSAZIONI === null) {
+    try { CONVERSAZIONI = JSON.parse(localStorage.getItem(CHIAVE_CHAT) || '[]'); } catch { CONVERSAZIONI = []; }
+    if (!Array.isArray(CONVERSAZIONI)) CONVERSAZIONI = [];
   }
-  apriPannello('chat', opener);
-  setTimeout(() => $('#chatDomanda').focus(), 0);
+  return CONVERSAZIONI;
 }
-function disegnaChatVuota() {
-  $('#chatRegistro').innerHTML = `<div class="chat-vuota">${ic('scintilla')}<span>Chiedi quello che ti serve sulle spedizioni, come lo chiederesti a un collega.</span></div>`;
+function salvaConversazioni(lista) {
+  CONVERSAZIONI = lista.slice().sort((a, b) => String(b.aggiornata).localeCompare(String(a.aggiornata))).slice(0, MAX_CONVERSAZIONI);
+  // Se lo spazio del browser finisce, si sacrificano le conversazioni piu' vecchie.
+  let tenute = CONVERSAZIONI;
+  while (tenute.length) {
+    try { localStorage.setItem(CHIAVE_CHAT, JSON.stringify(tenute)); return; }
+    catch { tenute = tenute.slice(0, Math.floor(tenute.length / 2)); }
+  }
 }
-async function chiedi() {
-  const area = $('#chatDomanda');
-  const domanda = area.value.trim(); if (!domanda) return;
-  area.value = ''; area.style.height = 'auto';
-  const reg = $('#chatRegistro');
-  $('.chat-vuota', reg)?.remove();
-  reg.insertAdjacentHTML('beforeend', `<div class="bolla mia">${esc(domanda)}</div><div class="bolla sua attesa">Ci penso…</div>`);
-  const bolla = reg.lastElementChild;
-  reg.scrollTop = reg.scrollHeight;
+function conversazione(id) { return conversazioni().find(c => c.id === id) || null; }
+function aggiornaConversazione(id, cambia) {
+  const lista = conversazioni().slice();
+  const c = lista.find(x => x.id === id); if (!c) return;
+  cambia(c);
+  c.aggiornata = new Date().toISOString();
+  salvaConversazioni(lista);
+}
+
+function alternaChat() {
+  if ($('#chatBox').classList.contains('nascosto-del-tutto')) apriChat(); else chiudiChat();
+}
+function apriChat() {
+  const box = $('#chatBox');
+  if (!box.dataset.pronta) costruisciChat(box);
+  box.classList.remove('nascosto-del-tutto');
+  $('#chatFab').setAttribute('aria-expanded', 'true');
+  $('#chatFab').classList.add('aperta');
+  $$('.navigazione-basso button').forEach(b => b.toggleAttribute('aria-current', b.dataset.sezione === 'chiedi'));
+  $$('.navigazione-basso button[aria-current]').forEach(b => b.setAttribute('aria-current', 'page'));
+  disegnaChat();
+  setTimeout(() => (S.chat.vista === 'chat' ? $('#cbDomanda') : $('#chatBox .cb-nuova'))?.focus(), 0);
+}
+function chiudiChat() {
+  $('#chatBox').classList.add('nascosto-del-tutto');
+  $('#chatFab').setAttribute('aria-expanded', 'false');
+  $('#chatFab').classList.remove('aperta');
+  mostraSezione(S.sezioneBase || 'coda');
+}
+function costruisciChat(box) {
+  box.innerHTML = `
+    <header class="cb-testa">
+      <div class="cb-id"><span class="cb-avatar" aria-hidden="true">${ic('scintilla')}</span>
+        <div><strong id="cbTitolo">Assistente</strong><span id="cbSotto">legge i dati del monitor</span></div></div>
+      <div class="cb-strumenti">
+        <button type="button" class="cb-icona" id="cbElenco" title="Conversazioni" aria-label="Conversazioni salvate">${ic('elenco')}</button>
+        <button type="button" class="cb-icona" id="cbNuova" title="Nuova conversazione" aria-label="Nuova conversazione">${ic('piu')}</button>
+        <button type="button" class="cb-icona" id="cbChiudi" title="Chiudi" aria-label="Chiudi">${ic('chiudi')}</button>
+      </div>
+    </header>
+    <div class="cb-corpo" id="cbCorpo" aria-live="polite"></div>
+    <form class="chat-scrivi" id="cbForm"><label for="cbDomanda" class="nascosto">La tua domanda</label>
+      <textarea id="cbDomanda" rows="1" maxlength="400" placeholder="Scrivi una domanda"></textarea>
+      <button type="submit" class="tasto-icona" aria-label="Invia">${ic('invia')}</button></form>`;
+  box.dataset.pronta = '1';
+  $('#cbChiudi').addEventListener('click', chiudiChat);
+  $('#cbNuova').addEventListener('click', nuovaConversazione);
+  $('#cbElenco').addEventListener('click', () => { S.chat.vista = S.chat.vista === 'elenco' ? 'chat' : 'elenco'; disegnaChat(); });
+  const area = $('#cbDomanda');
+  area.addEventListener('input', () => { area.style.height = 'auto'; area.style.height = `${Math.min(160, area.scrollHeight)}px`; });
+  area.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#cbForm').requestSubmit(); } });
+  $('#cbForm').addEventListener('submit', (e) => { e.preventDefault(); chiedi(); });
+  // Si riparte dall'ultima conversazione, come in un'app di messaggi.
+  S.chat.corrente = (conversazioni()[0] || {}).id || null;
+}
+function nuovaConversazione() {
+  S.chat.corrente = null; S.chat.vista = 'chat';
+  disegnaChat();
+  $('#cbDomanda').focus();
+}
+
+function disegnaChat() {
+  const corpo = $('#cbCorpo'); if (!corpo) return;
+  const elenco = S.chat.vista === 'elenco';
+  $('#cbForm').classList.toggle('nascosto-del-tutto', elenco);
+  $('#cbElenco').setAttribute('aria-pressed', String(elenco));
+  if (elenco) return disegnaElencoConversazioni(corpo);
+  const c = S.chat.corrente ? conversazione(S.chat.corrente) : null;
+  $('#cbTitolo').textContent = 'Assistente';
+  $('#cbSotto').textContent = c ? c.titolo : 'legge i dati del monitor';
+  if (!c || !c.messaggi.length) {
+    corpo.innerHTML = `<div class="chat-vuota">${ic('scintilla')}<span>Chiedi quello che ti serve sulle spedizioni, come lo chiederesti a un collega.</span></div>`;
+    return;
+  }
+  corpo.innerHTML = c.messaggi.map((m, i) => bollaHtml(m, i)).join('') + (S.chat.inAttesa === c.id ? '<div class="bolla sua attesa">Ci penso…</div>' : '');
+  $$('[data-mostra]', corpo).forEach(b => b.addEventListener('click', async () => {
+    S.assistenteTracking = c.messaggi[Number(b.dataset.mostra)].tracking || [];
+    chiudiChat();
+    await vaiA('assistente');
+  }));
+  $$('[data-copia]', corpo).forEach(b => b.addEventListener('click', () => copiaTracking(c.messaggi[Number(b.dataset.copia)].tracking || [], b)));
+  corpo.scrollTop = corpo.scrollHeight;
+}
+function bollaHtml(m, i) {
+  if (m.ruolo === 'operatore') return `<div class="bolla mia">${esc(m.testo)}</div>`;
+  const pezzi = [`<div>${esc(m.testo || '').replace(/\n/g, '<br>')}</div>`];
+  if (m.ripiego) pezzi.push('<div class="avvertenza">Risposta essenziale, calcolata dalle sole regole del monitor.</div>');
+  const t = m.tabella;
+  if (t && (t.righe || []).length) {
+    pezzi.push(`<table><thead><tr>${(t.colonne || []).map(x => `<th>${esc(x)}</th>`).join('')}</tr></thead><tbody>${t.righe.map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+  }
+  const n = (m.tracking || []).length;
+  if (n) {
+    const quante = m.totale > n ? `${n} di ${m.totale}` : `${n}`;
+    pezzi.push(`<span class="in-linea"><button type="button" class="collegamento" data-mostra="${i}">Mostrami quali (${quante})</button>`
+      + `<button type="button" class="collegamento" data-copia="${i}">Copia i tracking</button></span>`);
+  }
+  return `<div class="bolla sua ${m.errore ? 'errore' : ''}">${pezzi.join('')}</div>`;
+}
+async function copiaTracking(codici, tasto) {
+  // Uno per riga: si incollano cosi' come sono in un foglio o in una mail.
+  const testo = [...new Set(codici)].join('\n');
   try {
-    const esito = await api('/api/assistente', { method: 'POST', body: JSON.stringify({ domanda, storia: S.chatStoria }) });
-    S.chatStoria = [...S.chatStoria, { ruolo: 'operatore', testo: domanda }, { ruolo: 'assistente', testo: esito.risposta || '' }].slice(-8);
-    const pezzi = [`<div>${esc(esito.risposta || '').replace(/\n/g, '<br>')}</div>`];
-    if (esito.ripiego) pezzi.push('<div class="avvertenza">Risposta essenziale, calcolata dalle sole regole del monitor.</div>');
-    const t = esito.tabella;
-    if (t && (t.righe || []).length) {
-      pezzi.push(`<table><thead><tr>${(t.colonne || []).map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${t.righe.map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
-    }
-    const righe = esito.righe || [];
-    if (righe.length) {
-      const quante = esito.totale_righe > righe.length ? `${righe.length} di ${esito.totale_righe}` : `${righe.length}`;
-      pezzi.push(`<span class="in-linea"><button type="button" class="collegamento" data-mostra>Mostrami quali (${quante})</button>`
-        + `<button type="button" class="collegamento" data-copia>Copia i tracking</button></span>`);
-    }
-    bolla.classList.remove('attesa');
-    bolla.innerHTML = pezzi.join('');
-    $('[data-copia]', bolla)?.addEventListener('click', async (e) => {
-      const tasto = e.currentTarget;
-      // Uno per riga: si incollano cosi' come sono in un foglio o in una mail.
-      const codici = [...new Set(righe.map(r => r.tracking_number).filter(Boolean))];
-      try {
-        await navigator.clipboard.writeText(codici.join('\n'));
-        avvisa(`${plurale(codici.length, 'tracking copiato', 'tracking copiati')}`);
-      } catch {
-        tasto.insertAdjacentHTML('afterend', `<textarea class="area" rows="6" readonly>${esc(codici.join('\n'))}</textarea>`);
-      }
-    });
-    $('[data-mostra]', bolla)?.addEventListener('click', async () => {
-      S.assistenteTracking = righe.map(r => r.tracking_number).filter(Boolean);
-      chiudiPannelli();
-      await vaiA('assistente');
-    });
-  } catch (err) {
-    bolla.classList.remove('attesa');
-    bolla.innerHTML = `<div>Non riesco a rispondere adesso: ${esc(err.message)}</div>`;
+    await navigator.clipboard.writeText(testo);
+    avvisa(plurale(new Set(codici).size, 'tracking copiato', 'tracking copiati'));
+  } catch {
+    tasto.insertAdjacentHTML('afterend', `<textarea class="area" rows="6" readonly>${esc(testo)}</textarea>`);
   }
-  reg.scrollTop = reg.scrollHeight;
+}
+
+function disegnaElencoConversazioni(corpo) {
+  const lista = conversazioni();
+  $('#cbTitolo').textContent = 'Conversazioni';
+  $('#cbSotto').textContent = lista.length ? `${plurale(lista.length, 'salvata', 'salvate')} in questo browser` : 'nessuna ancora';
+  corpo.innerHTML = `<button type="button" class="tasto cb-nuova">${ic('piu')}Nuova conversazione</button>
+    ${lista.length ? `<ul class="cb-lista">${lista.map(c => {
+      const domande = c.messaggi.filter(m => m.ruolo === 'operatore').length;
+      return `<li class="${c.id === S.chat.corrente ? 'attuale' : ''}">
+        <button type="button" class="cb-conv" data-apri="${esc(c.id)}"><span class="forte taglia">${esc(c.titolo)}</span>
+          <span class="piccolo">${esc(quandoDetto(c.aggiornata))} · ${plurale(domande, 'domanda', 'domande')}</span></button>
+        <button type="button" class="cb-icona" data-elimina="${esc(c.id)}" aria-label="Elimina la conversazione" title="Elimina">${ic('cestino')}</button></li>`;
+    }).join('')}</ul>` : '<p class="meta cb-niente">Le conversazioni che farai restano qui, in questo browser.</p>'}`;
+  $('.cb-nuova', corpo).addEventListener('click', nuovaConversazione);
+  $$('[data-apri]', corpo).forEach(b => b.addEventListener('click', () => {
+    S.chat.corrente = b.dataset.apri; S.chat.vista = 'chat';
+    disegnaChat(); $('#cbDomanda').focus();
+  }));
+  $$('[data-elimina]', corpo).forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.elimina;
+    salvaConversazioni(conversazioni().filter(c => c.id !== id));
+    if (S.chat.corrente === id) S.chat.corrente = null;
+    disegnaChat();
+  }));
+}
+
+async function chiedi() {
+  const area = $('#cbDomanda');
+  const domanda = area.value.trim(); if (!domanda || S.chat.inAttesa) return;
+  area.value = ''; area.style.height = 'auto';
+  let c = S.chat.corrente ? conversazione(S.chat.corrente) : null;
+  if (!c) {
+    const adesso = new Date().toISOString();
+    c = { id: `c${Date.now().toString(36)}`, titolo: domanda.slice(0, 80), creata: adesso, aggiornata: adesso, messaggi: [] };
+    salvaConversazioni([c, ...conversazioni()]);
+    S.chat.corrente = c.id;
+  }
+  const id = c.id;
+  // Solo domande e risposte riuscite fanno da contesto, come prima.
+  const storia = c.messaggi.filter(m => !m.errore).slice(-8).map(m => ({ ruolo: m.ruolo, testo: m.testo }));
+  aggiornaConversazione(id, x => x.messaggi.push({ ruolo: 'operatore', testo: domanda }));
+  S.chat.inAttesa = id;
+  disegnaChat();
+  let risposta;
+  try {
+    const esito = await api('/api/assistente', { method: 'POST', body: JSON.stringify({ domanda, storia }) });
+    risposta = {
+      ruolo: 'assistente', testo: esito.risposta || '', ripiego: Boolean(esito.ripiego),
+      tabella: esito.tabella || null, totale: esito.totale_righe || 0,
+      tracking: (esito.righe || []).map(r => r.tracking_number).filter(Boolean).slice(0, 1000),
+    };
+  } catch (err) {
+    risposta = { ruolo: 'assistente', testo: `Non riesco a rispondere adesso: ${err.message}`, errore: true };
+  }
+  aggiornaConversazione(id, x => x.messaggi.push(risposta));
+  S.chat.inAttesa = null;
+  if (S.chat.corrente === id && S.chat.vista === 'chat') disegnaChat();
 }
 
 // ---------------------------------------------------------------------------
@@ -1409,29 +1731,36 @@ function collega() {
   });
   $('#apriRicerca').addEventListener('click', () => { const b = $('#ricercaBox'); b.classList.toggle('aperta'); if (b.classList.contains('aperta')) $('#cerca').focus(); });
   $('#sincronizza').addEventListener('click', sincronizza);
-  $('#apriChat').addEventListener('click', (e) => apriChat(e.currentTarget));
+  $('#chatFab').addEventListener('click', alternaChat);
   $('#apriNovita').addEventListener('click', (e) => apriNovita(e.currentTarget));
   $('#apriAnalisi').addEventListener('click', (e) => apriAnalisi(e.currentTarget));
   $('#apriArchivio').addEventListener('click', (e) => { e.stopPropagation(); apriMenu(e.currentTarget, $('#menuArchivio')); });
   $('#apriImpostazioni').addEventListener('click', (e) => { e.stopPropagation(); apriMenu(e.currentTarget, $('#menuImpostazioni')); });
-  document.addEventListener('click', (e) => { if (!e.target.closest('.menu-ancora')) chiudiMenu(); });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.menu-ancora')) chiudiMenu();
+    if (S.selettore && !e.target.closest('.selettore-date') && !S.selettore.tasto.contains(e.target)) chiudiSelettoreDate();
+  });
+  window.addEventListener('resize', () => chiudiSelettoreDate());
+  montaPeriodoCoda();
   $('#velo').addEventListener('click', chiudiPannelli);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (S.selettore) return chiudiSelettoreDate(true);
+    if (!$('#chatBox').classList.contains('nascosto-del-tutto') && $('#chatBox').contains(document.activeElement)) return chiudiChat();
     if (!$$('.menu').every(m => m.classList.contains('nascosto-del-tutto'))) return chiudiMenu();
     if (!$('#velo').classList.contains('nascosto-del-tutto')) return chiudiPannelli();
   });
   $('#filtroPriorita').addEventListener('change', (e) => { S.filtri.priorita = e.target.value; disegna(); });
   $('#filtroStato').addEventListener('change', (e) => { S.filtri.stato = e.target.value; disegna(); });
-  $('#filtroPeriodo').addEventListener('change', (e) => { S.filtri.periodo = e.target.value; disegna(); });
   $('#filtroContrassegno').addEventListener('change', (e) => { S.filtri.cod = e.target.checked; disegna(); });
   $('#azzeraFiltri').addEventListener('click', azzeraFiltri);
   $$('.navigazione-basso button').forEach(b => b.addEventListener('click', () => {
     const s = b.dataset.sezione;
     if (s === 'coda') { chiudiPannelli(); return vaiA(CODE.some(c => c.id === S.coda) ? S.coda : 'verificare'); }
     if (s === 'giacenze') { chiudiPannelli(); return apriGiacenze(); }
+    if (s === 'chiedi') return alternaChat();
     mostraSezione(s);
-    if (s === 'analisi') apriAnalisi(b); else apriChat(b);
+    apriAnalisi(b);
   }));
   window.addEventListener('resize', () => { if (S.analisi && !$('#analisi').classList.contains('nascosto-del-tutto')) disegnaGrafico($('#grafico'), S.analisi.serie || {}); });
   // Una sincronizzazione partita altrove (cron o un collega) si vede anche qui.
