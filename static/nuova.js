@@ -1539,7 +1539,7 @@ function costruisciChat(box) {
     </header>
     <div class="cb-corpo" id="cbCorpo" aria-live="polite"></div>
     <form class="chat-scrivi" id="cbForm"><label for="cbDomanda" class="nascosto">La tua domanda</label>
-      <textarea id="cbDomanda" rows="1" maxlength="400" placeholder="Scrivi una domanda"></textarea>
+      <textarea id="cbDomanda" rows="1" maxlength="4000" placeholder="Scrivi una domanda"></textarea>
       <button type="submit" class="tasto-icona" aria-label="Invia">${ic('invia')}</button></form>`;
   box.dataset.pronta = '1';
   $('#cbChiudi').addEventListener('click', chiudiChat);
@@ -1655,7 +1655,7 @@ async function chiedi() {
     risposta = {
       ruolo: 'assistente', testo: esito.risposta || '', ripiego: Boolean(esito.ripiego),
       tabella: esito.tabella || null, totale: esito.totale_righe || 0,
-      tracking: (esito.righe || []).map(r => r.tracking_number).filter(Boolean).slice(0, 1000),
+      tracking: (esito.righe || []).map(r => r.tracking_number).filter(Boolean),
     };
   } catch (err) {
     risposta = { ruolo: 'assistente', testo: `Non riesco a rispondere adesso: ${err.message}`, errore: true };

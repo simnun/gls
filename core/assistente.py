@@ -34,9 +34,10 @@ from .timezones import ROME
 # Le stesse quattro categorie del tab "In consegna": il collo si sta muovendo.
 CATEGORIE_IN_CONSEGNA = ("OUT_FOR_DELIVERY", "SCHEDULED", "IN_TRANSIT", "CORRESPONDENT")
 IN_LAVORAZIONE = ("IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_GLS")
-# Le righe dietro a una risposta, per «Mostrami quali» e «Copia i tracking»:
-# un mese di giacenze deve starci tutto, non fermarsi a meta'.
-LIMITE_RIGHE = 1000
+# Le righe dietro a una risposta, per «Mostrami quali» e «Copia i tracking».
+# Nessun tetto pratico: un anno di spedizioni deve starci tutto. Il valore
+# esiste solo come protezione contro un'interrogazione impazzita.
+LIMITE_RIGHE = 100000
 
 # ---------------------------------------------------------------------------
 # Vocabolario del dominio
@@ -880,7 +881,7 @@ class Assistente:
         if not domanda:
             return self._vuoto("Scrivimi una domanda: per esempio «quante sono in giacenza adesso?».")
         if len(domanda) > 400:
-            domanda = domanda[:400]
+            domanda = domanda[:4000]
         oggi = oggi or datetime.now(ROME).date()
         # Prima il collega: e' lui che deve rispondere. Le regole intervengono
         # solo se non e' raggiungibile, e in quel caso si vede dalla risposta.
@@ -1130,15 +1131,15 @@ class Assistente:
         with self.db.connect() as conn:
             righe = conn.execute(
                 f"SELECT {chiave} AS chiave, {conteggio} AS quante {da} WHERE {where}"
-                f" GROUP BY {chiave} ORDER BY {ordine} LIMIT 400", valori
+                f" GROUP BY {chiave} ORDER BY {ordine}", valori
             ).fetchall()
             elenco = self._righe(conn, lettura, da, where, valori)
         voci = [(str(r["chiave"] or ""), int(r["quante"] or 0)) for r in righe]
         if dimensione == "settimana":
             voci = _per_settimana(voci)
         voci = [(self._etichetta_gruppo(dimensione, k), q) for k, q in voci]
-        if not temporale:
-            voci = voci[:25]
+        # Tutti i gruppi, non solo i primi: il totale deve tornare con il
+        # conteggio semplice della stessa domanda.
         totale = sum(q for _, q in voci)
         if not voci:
             testo = "Non ho trovato niente con questi filtri."

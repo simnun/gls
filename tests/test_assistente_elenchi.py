@@ -80,8 +80,54 @@ class ElenchiGiacenzeTests(unittest.TestCase):
         self.assertIn("RETURN le rientrate", ISTRUZIONI)
 
     def test_il_limite_basta_per_un_mese_di_giacenze(self):
-        self.assertGreaterEqual(LIMITE_RIGHE, 1000)
+        self.assertGreaterEqual(LIMITE_RIGHE, 50000)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SenzaTettiTests(unittest.TestCase):
+    """Un mese intero di spedizioni: niente si ferma a mille righe o a 25 gruppi."""
+
+    QUANTE = 1300
+    CITTA = 40
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.db = Database(Path(cls.tmp.name) / "db.sqlite3")
+        for i in range(cls.QUANTE):
+            quando = datetime(2026, 10, 1 + i % 31, 10, tzinfo=ROME).isoformat(timespec="seconds")
+            cls.db.upsert_shipment({
+                "tracking_number": f"NI{666000000 + i}", "order_name": f"#29{i:04d}",
+                "customer_name": "Cliente", "city": f"Citta{i % cls.CITTA:02d}", "province": "NA",
+                "total_amount": 10.0, "currency": "EUR", "payment_gateways": [],
+                "is_cod": False, "gls_status": "Consegnata", "gls_note": "", "severity": "NORMAL",
+                "category": "DELIVERED", "closed": True, "workflow_status": "RESOLVED",
+                "gls_event_at": quando,
+            })
+        cls.assistente = Assistente(cls.db, durata_cache=0)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def leggi(self, **campi):
+        return costruisci_lettura(filtri(periodo_da="2026-10-01", periodo_a="2026-10-31",
+                                         periodo_etichetta="a ottobre", **campi), VOCABOLARIO, OGGI)
+
+    def test_tutte_le_spedizioni_del_mese_sono_nell_elenco(self):
+        calcolo = self.assistente.calcola(self.leggi(intento="elenca"))
+        self.assertEqual(calcolo["numero"], self.QUANTE)
+        self.assertEqual(len(calcolo["righe"]), self.QUANTE)
+
+    def test_il_raggruppamento_tiene_tutti_i_gruppi_e_il_totale_torna(self):
+        lettura = self.leggi(intento="raggruppa", raggruppa="citta")
+        calcolo = self.assistente.calcola(lettura)
+        voci = calcolo["tabella"]["righe"]
+        self.assertEqual(len(voci), self.CITTA)
+        self.assertEqual(sum(q for _, q in voci), self.QUANTE)
+        fuori = _risultato(calcolo, lettura)
+        self.assertEqual(fuori["ripartizione"]["voci_totali"], self.CITTA)
+        self.assertEqual(len(fuori["ripartizione"]["voci"]), self.CITTA)

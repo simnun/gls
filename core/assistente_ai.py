@@ -36,10 +36,10 @@ MODELLO_PREDEFINITO = "claude-opus-5-5"
 # dal 1 settembre, e quante di queste consegnate") finiva il budget pensando e
 # veniva troncata prima di scrivere la risposta. Il tetto non e' una spesa: si
 # paga quello che si usa davvero, e serve solo a fermare una risposta anomala.
-MAX_TOKEN_USCITA = 8000
+MAX_TOKEN_USCITA = 16000
 # Una domanda puo' richiedere piu' interrogazioni: "quante ne sono partite e
 # quante di quelle sono arrivate" sono due conteggi diversi.
-MAX_GIRI = 5
+MAX_GIRI = 10
 # Quante spedizioni di esempio accompagnano un conteggio: servono a far dire a
 # Claude "per esempio l'ordine #278004", non a fargli rifare i conti.
 MAX_ESEMPI = 6
@@ -226,7 +226,7 @@ class Collaboratore:
             return None
 
         vocabolario = assistente.vocabolario()
-        messaggi = _storia_pulita(storia) + [{"role": "user", "content": domanda[:400]}]
+        messaggi = _storia_pulita(storia) + [{"role": "user", "content": domanda[:4000]}]
         istruzioni = self._istruzioni(vocabolario, oggi)
         self.consumo.conversazioni += 1
 
@@ -338,7 +338,7 @@ def _storia_pulita(storia: list[dict[str, str]] | None) -> list[dict[str, str]]:
     messaggi: list[dict[str, str]] = []
     for voce in (storia or [])[-8:]:
         ruolo = "assistant" if str(voce.get("ruolo")) == "assistente" else "user"
-        testo = str(voce.get("testo") or "").strip()[:600]
+        testo = str(voce.get("testo") or "").strip()[:4000]
         if testo:
             messaggi.append({"role": ruolo, "content": testo})
     while messaggi and messaggi[0]["role"] != "user":
@@ -361,7 +361,8 @@ def _risultato(calcolo: dict[str, Any], lettura: Lettura) -> dict[str, Any]:
     if tabella and tabella.get("righe"):
         fuori["ripartizione"] = {
             "per": tabella.get("titolo"),
-            "voci": [[str(r[0]), r[1]] for r in tabella["righe"][:25]],
+            "voci": [[str(r[0]), r[1]] for r in tabella["righe"][:300]],
+            "voci_totali": len(tabella["righe"]),
         }
     esempi = []
     for riga in (calcolo.get("righe") or [])[:MAX_ESEMPI]:
