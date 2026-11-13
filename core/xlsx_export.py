@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+from datetime import date, datetime
 from io import BytesIO
 from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -13,22 +15,55 @@ def _col_name(idx: int) -> str:
     return name
 
 
+# Stili di cella: 0 normale, 1 intestazione, 2 data e ora, 3 data.
+STILE_DATA_ORA = 2
+STILE_DATA = 3
+_ORIGINE_EXCEL = datetime(1899, 12, 30)
+
+
+def _testo_cella(valore: object) -> str:
+    """Come appare il valore, per stimare la larghezza della colonna."""
+    if isinstance(valore, datetime):
+        return "00/00/0000 00:00"
+    if isinstance(valore, date):
+        return "00/00/0000"
+    return "" if valore is None else str(valore)
+
+
+def _cella(ref: str, valore: object, intestazione: bool) -> str:
+    """Numeri e date restano numeri e date, cosi' in Excel si ordinano e si sommano."""
+    if not intestazione and not isinstance(valore, bool):
+        if isinstance(valore, (int, float)) and math.isfinite(valore):
+            return f'<c r="{ref}"><v>{valore}</v></c>'
+        if isinstance(valore, datetime):
+            seriale = (valore.replace(tzinfo=None) - _ORIGINE_EXCEL).total_seconds() / 86400
+            return f'<c r="{ref}" s="{STILE_DATA_ORA}"><v>{seriale:.10f}</v></c>'
+        if isinstance(valore, date):
+            seriale = (datetime(valore.year, valore.month, valore.day) - _ORIGINE_EXCEL).days
+            return f'<c r="{ref}" s="{STILE_DATA}"><v>{seriale}</v></c>'
+    if isinstance(valore, bool):
+        valore = "Si" if valore else "No"
+    stile = ' s="1"' if intestazione else ''
+    testo = escape("" if valore is None else str(valore)).replace("\n", "&#10;")
+    return f'<c r="{ref}" t="inlineStr"{stile}><is><t xml:space="preserve">{testo}</t></is></c>'
+
+
 def build_xlsx(headers: list[str], rows: list[list[object]], sheet_name: str = "Incongruenze") -> bytes:
-    """Crea un XLSX semplice usando solo la standard library."""
-    all_rows = [headers] + [["" if v is None else str(v) for v in row] for row in rows]
+    """Crea un XLSX semplice usando solo la standard library.
+
+    Le celle di testo restano testo; numeri, date e date con ora vengono
+    scritti come tali, con il formato italiano.
+    """
+    all_rows: list[list[object]] = [list(headers)] + [list(row) for row in rows]
     widths = []
     for c in range(len(headers)):
-        max_len = max((len(str(r[c])) if c < len(r) else 0 for r in all_rows), default=8)
+        max_len = max((len(_testo_cella(r[c])) if c < len(r) else 0 for r in all_rows), default=8)
         widths.append(min(max(max_len + 2, 10), 55))
 
     row_xml = []
     for r_idx, row in enumerate(all_rows, start=1):
-        cells = []
-        for c_idx, value in enumerate(row, start=1):
-            ref = f"{_col_name(c_idx)}{r_idx}"
-            style = ' s="1"' if r_idx == 1 else ''
-            text = escape(str(value)).replace("\n", "&#10;")
-            cells.append(f'<c r="{ref}" t="inlineStr"{style}><is><t xml:space="preserve">{text}</t></is></c>')
+        cells = [_cella(f"{_col_name(c_idx)}{r_idx}", value, r_idx == 1)
+                 for c_idx, value in enumerate(row, start=1)]
         row_xml.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
 
     cols = "".join(
@@ -51,11 +86,13 @@ def build_xlsx(headers: list[str], rows: list[list[object]], sheet_name: str = "
 </workbook>'''
     styles = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy hh:mm"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/></numFmts>
   <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
   <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+  <cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>'''
     content_types = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">

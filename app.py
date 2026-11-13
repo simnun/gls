@@ -28,6 +28,7 @@ from core.assistente_ai import Collaboratore
 from core.db import Database
 from core.timezones import ROME
 from core.sync import SyncEngine
+from core.esporta import righe_spedizioni
 from core.xlsx_export import build_xlsx
 
 CONFIG = get_config()
@@ -277,9 +278,9 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _read_json(self) -> dict:
+    def _read_json(self, limite: int = 64 * 1024) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
-        if length > 64 * 1024:
+        if length > limite:
             raise ValueError("Payload troppo grande")
         raw = self.rfile.read(length) if length else b"{}"
         return json.loads(raw.decode("utf-8"))
@@ -545,6 +546,22 @@ class AppHandler(BaseHTTPRequestHandler):
                 if not started:
                     return self._json({"ok": False, "message": "Sincronizzazione gia in corso"}, 409)
                 return self._json({"ok": True, "message": "Sincronizzazione avviata"}, 202)
+
+            if path == "/api/shipments/export.xlsx":
+                # L'elenco viene dalla pagina, cosi' com'e' filtrato e ordinato a
+                # schermo: decine di migliaia di tracking stanno in pochi MB.
+                body = self._read_json(limite=8 * 1024 * 1024)
+                trackings = body.get("tracking") if isinstance(body.get("tracking"), list) else []
+                spedizioni = DB.spedizioni_per_export([str(t) for t in trackings])
+                intestazioni, righe = righe_spedizioni(spedizioni, self._links)
+                nome = "".join(ch for ch in str(body.get("nome") or "spedizioni")
+                               if ch.isalnum() or ch in "-_")[:60] or "spedizioni"
+                oggi = datetime.now(ROME).strftime("%Y-%m-%d")
+                return self._bytes(
+                    build_xlsx(intestazioni, righe, "Spedizioni GLS"),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    f"GLS_{nome}_{oggi}.xlsx",
+                )
 
             if path.startswith("/api/shipment/") and path.endswith("/workflow"):
                 tracking = unquote(path[len("/api/shipment/"):-len("/workflow")]).strip("/")

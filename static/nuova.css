@@ -567,3 +567,8 @@ h1, h2, h3, b, strong { font-weight: 600; }
   .chat-fab { display: none; }
   .chat-box { left: 8px; right: 8px; top: 8px; bottom: calc(72px + env(safe-area-inset-bottom)); width: auto; height: auto; }
 }
+
+/* Esporta */
+.tasto.esporta { height: 32px; padding: 0 12px; border-radius: 16px; font-size: 13px; }
+.tasto.esporta svg { width: 14px; height: 14px; color: var(--tenue); }
+@media (max-width: 760px) { .tasto.esporta { flex: none; } }

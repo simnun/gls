@@ -1139,6 +1139,32 @@ class Database:
             )
         return int(cur.lastrowid)
 
+    def spedizioni_per_export(self, trackings: list[str]) -> list[dict[str, Any]]:
+        """Le spedizioni indicate, nell'ordine dato, con giacenze e svincoli contati.
+
+        Serve all'esportazione in Excel di quello che l'operatore ha filtrato a
+        schermo: l'elenco arriva dalla pagina, i dati freschi dal database.
+        """
+        voluti = list(dict.fromkeys(str(t).strip() for t in trackings if str(t or "").strip()))
+        trovate: dict[str, dict[str, Any]] = {}
+        with self.connect() as conn:
+            # A blocchi: una IN con migliaia di valori supera i limiti di SQLite.
+            for inizio in range(0, len(voluti), 500):
+                blocco = voluti[inizio:inizio + 500]
+                segnaposti = ",".join("?" for _ in blocco)
+                for riga in conn.execute(
+                    f"""SELECT s.*,
+                               (SELECT COUNT(*) FROM stock_cases sc
+                                WHERE sc.tracking_number=s.tracking_number) AS giacenze,
+                               (SELECT COUNT(*) FROM gls_release_requests r
+                                WHERE r.tracking_number=s.tracking_number AND r.gls_success=1) AS svincoli
+                        FROM shipments s WHERE s.tracking_number IN ({segnaposti})""",
+                    blocco,
+                ).fetchall():
+                    item = self._shipment_row(dict(riga))
+                    trovate[item["tracking_number"]] = item
+        return [trovate[t] for t in voluti if t in trovate]
+
     def dashboard(self, include_closed: bool = False) -> dict[str, Any]:
         where = "1=1" if include_closed else "s.closed=0"
         with self.connect() as conn:

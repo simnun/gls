@@ -499,6 +499,48 @@ function disegna() {
   disegnaSelezione();
 }
 
+// Esattamente quello che c'e' a schermo: coda o ricerca, filtri, ordine.
+function righeMostrate() {
+  const base = S.ricerca ? spedizioni() : righeDellaCoda();
+  return ordina(filtra(cercaTra(base)));
+}
+
+async function esporta() {
+  const tasto = $('#esporta');
+  const righe = righeMostrate();
+  if (!righe.length) { avvisa('Non ci sono spedizioni da esportare con questi filtri.', true); return; }
+  const nome = S.ricerca ? 'ricerca' : ({ ...Object.fromEntries(CODE.map(c => [c.id, c.nome])), ...ARCHIVIO }[S.coda] || 'spedizioni');
+  tasto.disabled = true;
+  const prima = tasto.innerHTML;
+  tasto.lastChild.textContent = 'Preparo il file…';
+  try {
+    const risposta = await fetch('/api/shipments/export.xlsx', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+      body: JSON.stringify({ tracking: righe.map(r => r.tracking_number), nome: nome.replace(/[^\p{L}\p{N}]+/gu, '-') }),
+    });
+    if (risposta.status === 401) { location.replace('/login'); return; }
+    if (!risposta.ok) {
+      let messaggio = `Errore ${risposta.status}`;
+      try { messaggio = (await risposta.json()).error || messaggio; } catch {}
+      throw new Error(messaggio);
+    }
+    const file = await risposta.blob();
+    const intestazione = risposta.headers.get('Content-Disposition') || '';
+    const nomeFile = (intestazione.match(/filename="([^"]+)"/) || [])[1] || 'GLS_spedizioni.xlsx';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(file);
+    link.download = nomeFile;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    avvisa(`${plurale(righe.length, 'spedizione esportata', 'spedizioni esportate')} in Excel`);
+  } catch (err) {
+    avvisa(`Esportazione non riuscita: ${err.message}`, true);
+  } finally {
+    tasto.disabled = false;
+    tasto.innerHTML = prima;
+  }
+}
+
 function rigaHtml(r) {
   const g = gravita(r);
   const t = esc(r.tracking_number);
@@ -1754,6 +1796,7 @@ function collega() {
   $('#filtroStato').addEventListener('change', (e) => { S.filtri.stato = e.target.value; disegna(); });
   $('#filtroContrassegno').addEventListener('change', (e) => { S.filtri.cod = e.target.checked; disegna(); });
   $('#azzeraFiltri').addEventListener('click', azzeraFiltri);
+  $('#esporta').addEventListener('click', esporta);
   $$('.navigazione-basso button').forEach(b => b.addEventListener('click', () => {
     const s = b.dataset.sezione;
     if (s === 'coda') { chiudiPannelli(); return vaiA(CODE.some(c => c.id === S.coda) ? S.coda : 'verificare'); }
