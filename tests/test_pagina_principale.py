@@ -25,6 +25,8 @@ class PaginaPrincipaleTests(unittest.TestCase):
         stato, corpo = apri("/")
         self.assertTrue(stato.startswith("200"))
         self.assertIn(b"/nuova.js", corpo)
+        # La contabilita' si apre dal tasto con l'euro, accanto all'ora dell'aggiornamento.
+        self.assertLess(corpo.index(b'id="apriContabilita"'), corpo.index(b'id="aggiornato"'))
 
     def test_il_vecchio_indirizzo_nuova_funziona_ancora(self):
         stato, corpo = apri("/nuova")

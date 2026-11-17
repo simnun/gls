@@ -79,7 +79,8 @@ class ContabilitaTests(unittest.TestCase):
         ])
         esiti = [(r["esito"], r["dettaglio"]) for r in analisi["righe"]]
         self.assertEqual(esiti[0], ("consegnata", "Consegnata"))
-        self.assertEqual(esiti[1], ("giacenza", "Consegnata dopo una giacenza"))
+        # Consegnata e' verde anche dopo una giacenza: conta com'e' finita.
+        self.assertEqual(esiti[1], ("consegnata", "Consegnata dopo una giacenza"))
         self.assertEqual(esiti[2][0], "resa")
         self.assertEqual(esiti[3], ("giacenza", "Ancora ferma in sede GLS"))
         self.assertEqual(esiti[4][0], "viaggio")
@@ -126,6 +127,67 @@ class ContabilitaTests(unittest.TestCase):
     def test_file_senza_colonna_spedizione(self):
         with self.assertRaises(contabilita.FileNonLeggibile):
             contabilita.leggi_file("altro.csv", b"a;b\n1;2\n")
+
+    def test_mese_del_file(self):
+        intestazioni, dati = contabilita.leggi_file("partenze.xlsx", file_excel([riga(665000001), riga(665000002)]))
+        self.assertEqual(contabilita.mese_del_file(intestazioni, dati), "2026-10")
+        self.assertEqual(contabilita.nome_mese("2026-10"), "Ottobre 2026")
+        self.assertIsNone(contabilita.mese_del_file(["Spedizione"], [[1]]))
+
+    def test_avanzamento_durante_lettura_e_confronto(self):
+        passi = []
+        intestazioni, dati = contabilita.leggi_file(
+            "partenze.xlsx", file_excel([riga(665000001)] * 250), lambda f, t: passi.append(("lettura", f, t)))
+        contabilita.analizza(intestazioni, dati, self.db.spedizioni_per_contabilita(),
+                             lambda f, t: passi.append(("confronto", f, t)))
+        self.assertIn(("confronto", 200, 250), passi)
+        self.assertEqual([p for p in passi if p[0] == "lettura"][-1][1:], (252, 252))
+
+    def test_lavoro_in_sottofondo(self):
+        import time
+        lavori = contabilita.Lavori()
+
+        def lavoro(chiave, n):
+            lavori.aggiorna(chiave, percentuale=50, fase="a metà")
+            lavori.aggiorna(chiave, percentuale=100, finito=True, risultato={"n": n}, analisi=("x",))
+
+        chiave = lavori.avvia(lavoro, 7)
+        for _ in range(100):
+            stato = lavori.stato(chiave)
+            if stato["finito"]:
+                break
+            time.sleep(0.01)
+        self.assertEqual(stato["risultato"], {"n": 7})
+        self.assertEqual(lavori.analisi(chiave), ("x",))
+        self.assertIsNone(lavori.stato("non-esiste"))
+
+        def rotto(chiave):
+            raise contabilita.FileNonLeggibile("Manca la colonna")
+
+        chiave = lavori.avvia(rotto)
+        for _ in range(100):
+            stato = lavori.stato(chiave)
+            if stato["finito"]:
+                break
+            time.sleep(0.01)
+        self.assertEqual(stato["errore"], "Manca la colonna")
+
+    def test_un_analisi_per_mese(self):
+        primo = self.db.salva_analisi_contabile("2026-10", "a.xlsx", b"uno", {"spedizioni": 1}, "Simone")
+        self.db.salva_analisi_contabile("2026-09", "b.xlsx", b"due", {"spedizioni": 2})
+        # Ricaricare lo stesso mese lo sostituisce.
+        stesso = self.db.salva_analisi_contabile("2026-10", "c.xlsx", b"tre", {"spedizioni": 3}, "Daniela")
+        self.assertEqual(primo, stesso)
+        elenco = self.db.elenco_analisi_contabili()
+        self.assertEqual([a["mese"] for a in elenco], ["2026-10", "2026-09"])
+        self.assertEqual(elenco[0]["riepilogo"], {"spedizioni": 3})
+        self.assertNotIn("contenuto", elenco[0])
+        salvata = self.db.analisi_contabile(primo)
+        self.assertEqual((salvata["nome_file"], salvata["contenuto"]), ("c.xlsx", b"tre"))
+        self.db.aggiorna_riepilogo_contabile(primo, {"spedizioni": 4})
+        self.assertEqual(self.db.elenco_analisi_contabili()[0]["riepilogo"], {"spedizioni": 4})
+        self.db.elimina_analisi_contabile(primo)
+        self.assertIsNone(self.db.analisi_contabile(primo))
 
 
 if __name__ == "__main__":

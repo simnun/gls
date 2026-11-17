@@ -280,6 +280,19 @@ class Database:
                     FOREIGN KEY(sync_id) REFERENCES sync_runs(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_sync_errors_sync ON sync_errors(sync_id, error_code);
+
+                -- Contabilita': il file del service di ogni mese, cosi' com'e'
+                -- arrivato, e il riepilogo dell'ultima analisi. Uno per mese.
+                CREATE TABLE IF NOT EXISTS analisi_contabili (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mese TEXT NOT NULL UNIQUE,
+                    nome_file TEXT NOT NULL,
+                    contenuto TEXT NOT NULL,
+                    riepilogo TEXT,
+                    caricato_da TEXT,
+                    caricato_il TEXT NOT NULL,
+                    aggiornato_il TEXT NOT NULL
+                );
                 """
             )
             self._migrate_shipments(conn)
@@ -1141,6 +1154,63 @@ class Database:
                 (action_label, now, operator_name, tracking_number),
             )
         return int(cur.lastrowid)
+
+    def salva_analisi_contabile(self, mese: str, nome_file: str, contenuto: bytes,
+                                riepilogo: dict[str, Any], operatore: str = "") -> int:
+        """Salva il file del mese (lo sostituisce se c'era gia') e il suo riepilogo."""
+        import base64
+
+        adesso = utcnow()
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO analisi_contabili(mese, nome_file, contenuto, riepilogo, caricato_da,
+                                                 caricato_il, aggiornato_il)
+                   VALUES(?,?,?,?,?,?,?)
+                   ON CONFLICT(mese) DO UPDATE SET nome_file=excluded.nome_file, contenuto=excluded.contenuto,
+                       riepilogo=excluded.riepilogo, caricato_da=excluded.caricato_da,
+                       caricato_il=excluded.caricato_il, aggiornato_il=excluded.aggiornato_il""",
+                (mese, nome_file, base64.b64encode(contenuto).decode("ascii"),
+                 json.dumps(riepilogo, ensure_ascii=False), operatore, adesso, adesso),
+            )
+            return int(conn.execute("SELECT id FROM analisi_contabili WHERE mese=?", (mese,)).fetchone()["id"])
+
+    def aggiorna_riepilogo_contabile(self, analisi_id: int, riepilogo: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE analisi_contabili SET riepilogo=?, aggiornato_il=? WHERE id=?",
+                         (json.dumps(riepilogo, ensure_ascii=False), utcnow(), analisi_id))
+
+    def elenco_analisi_contabili(self) -> list[dict[str, Any]]:
+        """Le analisi salvate, dal mese piu' recente; senza il file."""
+        with self.connect() as conn:
+            righe = conn.execute(
+                """SELECT id, mese, nome_file, riepilogo, caricato_da, caricato_il, aggiornato_il
+                   FROM analisi_contabili ORDER BY mese DESC"""
+            ).fetchall()
+        fuori = []
+        for riga in righe:
+            voce = dict(riga)
+            try:
+                voce["riepilogo"] = json.loads(voce.get("riepilogo") or "{}")
+            except ValueError:
+                voce["riepilogo"] = {}
+            fuori.append(voce)
+        return fuori
+
+    def analisi_contabile(self, analisi_id: int) -> dict[str, Any] | None:
+        """Una analisi con il file originale (in byte)."""
+        import base64
+
+        with self.connect() as conn:
+            riga = conn.execute("SELECT * FROM analisi_contabili WHERE id=?", (analisi_id,)).fetchone()
+        if not riga:
+            return None
+        voce = dict(riga)
+        voce["contenuto"] = base64.b64decode(voce["contenuto"])
+        return voce
+
+    def elimina_analisi_contabile(self, analisi_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM analisi_contabili WHERE id=?", (analisi_id,))
 
     def spedizioni_per_contabilita(self) -> dict[str, dict[str, Any]]:
         """Tutte le spedizioni seguite, per numero (solo cifre) del tracking.

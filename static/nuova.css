@@ -606,3 +606,35 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .tabella-file .numero-cella { text-align: right; font-variant-numeric: tabular-nums; }
 .tabella-file .stato-cella { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .tabella-file .controlli-cella { white-space: normal; min-width: 220px; color: var(--massima); font-weight: 600; }
+
+/* Contabilita': elenco dei mesi, avanzamento, ordinamento */
+.carica-file { padding: 32px 24px; }
+.elenco-contabile { display: flex; flex-direction: column; gap: 8px; }
+.riga-contabile { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px; cursor: pointer; }
+.riga-contabile:hover { border-color: var(--bordo); box-shadow: var(--ombra); }
+.riga-contabile:focus-visible { outline: 2px solid var(--accento); outline-offset: 2px; }
+.riga-contabile-testa { display: flex; align-items: center; gap: 12px; }
+.mese-contabile { font-size: 16px; letter-spacing: .04em; }
+.costo-contabile { margin-left: auto; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.riga-contabile .barra-esiti { height: 8px; }
+.riga-contabile-breve { font-size: 14px; color: var(--testo-2); }
+.riga-contabile .da-controllare { color: var(--massima); }
+.cb-icona { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid transparent; background: none; color: var(--tenue); cursor: pointer; }
+.cb-icona:hover { border-color: var(--bordo); color: var(--massima); }
+.cb-icona svg { width: 16px; height: 16px; }
+.controlli-file.tutto-bene { background: var(--normale-fondo); }
+.velo-contabile { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(15, 20, 30, .62); backdrop-filter: blur(2px); }
+.avanzamento-contabile { width: min(440px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 24px;
+  background: var(--superficie); border-radius: var(--raggio-grande); box-shadow: var(--ombra); }
+.avanzamento-contabile strong { overflow-wrap: anywhere; }
+.barra-contabile { height: 10px; border-radius: 5px; background: var(--riga); overflow: hidden; }
+.barra-contabile span { display: block; height: 100%; width: 0; background: var(--accento); transition: width .3s ease; }
+#acPercentuale { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tabella-file th { padding: 0; }
+.ordina-colonna { display: inline-flex; align-items: center; gap: 4px; width: 100%; padding: 8px 12px; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.ordina-colonna:hover, .ordina-colonna.attiva { color: var(--testo); }
+.ordina-colonna svg { width: 12px; height: 12px; flex: none; }
+.tabella-file td:first-child { white-space: normal; min-width: 180px; max-width: 320px; }

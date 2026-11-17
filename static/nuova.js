@@ -108,7 +108,7 @@ function esc(v) {
   return String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 }
-function data(v) { const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d; }
+function data(v) { if (v == null || v === '') return null; const d = new Date(v); return Number.isNaN(d.getTime()) ? null : d; }
 function due(n) { return String(n).padStart(2, '0'); }
 function giornoOra(v) {
   const d = data(v); if (!d) return '';
@@ -367,12 +367,10 @@ function disegnaMenuArchivio() {
   if (ignoti) voci.push(`<button type="button" role="menuitem" data-archivio="sconosciuti">${esc(ARCHIVIO.sconosciuti)} <span class="quante">${ignoti}</span></button>`);
   voci.push('<hr>');
   voci.push(`<button type="button" role="menuitem" data-archivio="giacenze">Storico giacenze <span class="quante">${Number(S.dati?.giacenze_totali || 0)}</span></button>`);
-  voci.push('<button type="button" role="menuitem" data-archivio="contabilita">Contabilità corriere</button>');
   $('#menuArchivio').innerHTML = voci.join('');
   $$('[data-archivio]', $('#menuArchivio')).forEach(b => b.addEventListener('click', () => {
     chiudiMenu();
     if (b.dataset.archivio === 'giacenze') return apriGiacenze();
-    if (b.dataset.archivio === 'contabilita') return apriContabilita();
     vaiA(b.dataset.archivio);
   }));
 }
@@ -1506,89 +1504,306 @@ function rigaGiacenza(c) {
 // Contabilita': il file delle spedizioni del service, analizzato dal monitor
 // ---------------------------------------------------------------------------
 
-// Il file resta solo in questa pagina: si rilegge per scaricare quello
-// analizzato, niente viene salvato sul server.
 function euro(valore) {
   return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(valore || 0));
 }
+const numeroIt = (n) => new Intl.NumberFormat('it-IT').format(Number(n || 0));
 
-function apriContabilita() {
+async function apriContabilita() {
   S.scelte.clear(); disegnaSelezione();
+  chiudiPannelli();
   mostraSezione('contabilita');
   window.scrollTo({ top: 0 });
+  S.contabilita = S.contabilita || { elenco: null, aperta: null };
+  S.contabilita.aperta = null;
   disegnaContabilita();
+  await caricaElencoContabile();
+}
+
+async function caricaElencoContabile() {
+  try {
+    S.contabilita.elenco = (await api('/api/contabilita/elenco')).analisi || [];
+  } catch (err) {
+    avvisa(`Elenco delle analisi non disponibile: ${err.message}`, true);
+    S.contabilita.elenco = [];
+  }
+  if (S.sezioneBase === 'contabilita' && !S.contabilita.aperta) disegnaContabilita();
 }
 
 function disegnaContabilita() {
-  const vista = $('#vistaContabilita');
   const c = S.contabilita;
-  const testa = `<div class="titolo-vista">
+  if (c?.aperta) return disegnaAnalisiContabile();
+  const vista = $('#vistaContabilita');
+  const elenco = c?.elenco;
+  vista.innerHTML = `
+    <div class="titolo-vista">
       <button type="button" class="indietro" id="cIndietro">${ic('indietro')}Torna alla coda</button>
       <h1>Contabilità corriere</h1>
-      <p>Carica il file delle spedizioni che manda il service: lo confronto con il monitor e ti dico com’è andata ogni spedizione e cosa va controllato.</p>
-    </div>`;
-  if (!c || !c.dati) {
-    vista.innerHTML = `${testa}
-      <label class="carica-file riquadro" id="cCarica">
-        <input type="file" id="cFile" accept=".xlsx,.xls,.csv" class="nascosto">
-        ${ic('pacco')}
-        <strong>${c?.inCorso ? `Analizzo ${esc(c.nome)}…` : 'Trascina qui il file, oppure clicca per sceglierlo'}</strong>
-        <span class="meta">Excel (.xlsx, .xls) o CSV, come lo manda il service. Le colonne si riconoscono dal nome.</span>
-      </label>`;
-    collegaCaricamento();
-    $('#cIndietro').addEventListener('click', () => vaiA(CODE.some(x => x.id === S.coda) ? S.coda : 'verificare'));
-    return;
+    </div>
+    <label class="carica-file riquadro" id="cCarica">
+      <input type="file" id="cFile" accept=".xlsx,.xls,.csv" class="nascosto">
+      ${ic('su')}<strong>Trascina qui il file, oppure clicca per sceglierlo</strong>
+    </label>
+    <section class="elenco-contabile" aria-label="Analisi salvate">
+      ${elenco == null ? '<p class="meta">Carico le analisi…</p>'
+        : !elenco.length ? '<p class="meta">Nessuna analisi ancora.</p>'
+        : elenco.map(rigaContabile).join('')}
+    </section>`;
+  $('#cIndietro').addEventListener('click', () => vaiA(CODE.some(x => x.id === S.coda) ? S.coda : 'verificare'));
+  collegaCaricamento();
+  $$('[data-apri-analisi]', vista).forEach(el => {
+    const apri = () => riapriContabile(Number(el.dataset.apriAnalisi), el.dataset.nome);
+    el.addEventListener('click', (e) => { if (!e.target.closest('[data-elimina-analisi]')) apri(); });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) apri(); });
+  });
+  $$('[data-elimina-analisi]', vista).forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!confirm(`Eliminare l’analisi di ${b.dataset.nome}? Il file andrà ricaricato.`)) return;
+    try {
+      await api(`/api/contabilita/elimina/${b.dataset.eliminaAnalisi}`, { method: 'POST', body: '{}' });
+      await caricaElencoContabile();
+    } catch (err) { avvisa(err.message, true); }
+  }));
+}
+
+const COLORI_ESITO = {
+  consegnata: '#C6EFCE', giacenza: '#FFEB9C', resa: '#FFC7CE', problema: '#F8CBAD',
+  viaggio: '#DDEBF7', annullato: '#E4DFEC', sconosciuta: '#EDEDED',
+};
+function nomeMese(mese) {
+  const [anno, numero] = String(mese || '').split('-');
+  const m = MESI[Number(numero) - 1];
+  return m ? `${m[0].toUpperCase()}${m.slice(1)} ${anno}` : String(mese || '');
+}
+function rigaContabile(a) {
+  const r = a.riepilogo || {};
+  const esiti = r.esiti || [];
+  const conta = (k) => (esiti.find(e => e.chiave === k) || {}).righe || 0;
+  const pezzi = [
+    `${numeroIt(r.spedizioni)} spedizioni`, `${numeroIt(conta('consegnata'))} consegnate`, `${numeroIt(conta('resa'))} rese`,
+  ];
+  if (conta('giacenza')) pezzi.push(`${numeroIt(conta('giacenza'))} in giacenza`);
+  if (conta('sconosciuta')) pezzi.push(`${numeroIt(conta('sconosciuta'))} non trovate`);
+  pezzi.push(r.controlli ? `<b class="da-controllare">${numeroIt(r.controlli)} da controllare</b>` : 'niente da controllare');
+  return `<div class="riga-contabile riquadro" data-apri-analisi="${a.id}" data-nome="${esc(nomeMese(a.mese))}" tabindex="0" role="button">
+    <div class="riga-contabile-testa">
+      <strong class="mese-contabile">${esc(nomeMese(a.mese).toUpperCase())}</strong>
+      <span class="costo-contabile">${euro(r.costo_totale)}</span>
+      <button type="button" class="cb-icona" data-elimina-analisi="${a.id}" data-nome="${esc(nomeMese(a.mese))}" aria-label="Elimina l’analisi" title="Elimina">${ic('cestino')}</button>
+    </div>
+    <div class="barra-esiti">${esiti.map(e => `<span style="flex:${e.righe};background:${COLORI_ESITO[e.chiave] || '#eee'}"></span>`).join('')}</div>
+    <div class="riga-contabile-breve">${pezzi.join(' · ')}</div>
+    <div class="piccolo">${esc(a.nome_file)} · caricato ${esc(quandoDetto(a.caricato_il))}${a.caricato_da ? ` da ${esc(a.caricato_da)}` : ''}</div>
+  </div>`;
+}
+
+function collegaCaricamento() {
+  const zona = $('#cCarica'); const input = $('#cFile');
+  input.addEventListener('change', () => { if (input.files[0]) caricaContabile(input.files[0]); });
+  ['dragenter', 'dragover'].forEach(t => zona.addEventListener(t, (e) => { e.preventDefault(); zona.classList.add('trascina'); }));
+  ['dragleave', 'drop'].forEach(t => zona.addEventListener(t, (e) => { e.preventDefault(); zona.classList.remove('trascina'); }));
+  zona.addEventListener('drop', (e) => { const file = e.dataTransfer?.files?.[0]; if (file) caricaContabile(file); });
+}
+
+// --- avanzamento: pagina oscurata, barra, percentuale e tempo rimanente misurato
+function mostraAvanzamento(titolo) {
+  let velo = $('#veloContabile');
+  if (!velo) {
+    velo = document.createElement('div');
+    velo.id = 'veloContabile';
+    velo.className = 'velo-contabile';
+    velo.setAttribute('role', 'status');
+    velo.setAttribute('aria-live', 'polite');
+    document.body.appendChild(velo);
   }
-  const d = c.dati; const r = d.riepilogo; const f = c.filtri;
+  velo.innerHTML = `<div class="avanzamento-contabile">
+    <strong>${esc(titolo)}</strong>
+    <div class="barra-contabile"><span id="acBarra"></span></div>
+    <div class="tra"><span id="acPercentuale">0%</span><span id="acTempo" class="meta">Calcolo il tempo…</span></div>
+    <span id="acFase" class="meta">In partenza</span></div>`;
+  return { inizio: Date.now() };
+}
+function segnaAvanzamento(stato, percentuale, fase) {
+  const p = Math.max(0, Math.min(100, percentuale));
+  $('#acBarra').style.width = `${p}%`;
+  $('#acPercentuale').textContent = `${Math.floor(p)}%`;
+  $('#acFase').textContent = fase || '';
+  const trascorsi = (Date.now() - stato.inizio) / 1000;
+  let tempo = 'Calcolo il tempo…';
+  if (p >= 3 && p < 100) {
+    const resto = Math.round(trascorsi / p * (100 - p));
+    tempo = resto < 2 ? 'Quasi fatto' : resto < 60 ? `circa ${resto} secondi rimanenti` : `circa ${Math.ceil(resto / 60)} minuti rimanenti`;
+  } else if (p >= 100) tempo = 'Fatto';
+  $('#acTempo').textContent = tempo;
+}
+function chiudiAvanzamento() { $('#veloContabile')?.remove(); }
+
+// L'invio del file pesa per il 15%, l'analisi sul server per il resto.
+const QUOTA_INVIO = 15;
+function inviaFile(file, stato) {
+  return new Promise((risolvi, rifiuta) => {
+    const xhr = new XMLHttpRequest();
+    const nome = operatoreSilenzioso();
+    xhr.open('POST', `/api/contabilita/carica?nome=${encodeURIComponent(file.name)}&operatore=${encodeURIComponent(nome)}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) segnaAvanzamento(stato, QUOTA_INVIO * e.loaded / e.total,
+        `Invio il file: ${Math.round(e.loaded / 1024)} di ${Math.round(e.total / 1024)} KB`);
+    };
+    xhr.onload = () => {
+      let corpo = {};
+      try { corpo = JSON.parse(xhr.responseText || '{}'); } catch {}
+      if (xhr.status === 401) { location.replace('/login'); return; }
+      if (xhr.status >= 400) rifiuta(new Error(corpo.error || `Errore ${xhr.status}`)); else risolvi(corpo);
+    };
+    xhr.onerror = () => rifiuta(new Error('Connessione interrotta durante l’invio'));
+    xhr.send(file);
+  });
+}
+function operatoreSilenzioso() {
+  return (S.dati?.config?.current_user?.display_name || memoria('glsMonitorOperator') || '').trim();
+}
+
+async function seguiLavoro(lavoro, stato, quotaPrima) {
+  while (true) {
+    const s = await api(`/api/contabilita/lavoro/${lavoro}`);
+    segnaAvanzamento(stato, quotaPrima + (100 - quotaPrima) * (s.percentuale / 100), s.fase);
+    if (s.finito) {
+      if (s.errore) throw new Error(s.errore);
+      return s.risultato;
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+}
+
+async function caricaContabile(file) {
+  const stato = mostraAvanzamento(`Analizzo ${file.name}`);
+  try {
+    const { lavoro } = await inviaFile(file, stato);
+    const dati = await seguiLavoro(lavoro, stato, QUOTA_INVIO);
+    apriRisultatoContabile(dati, lavoro);
+  } catch (err) {
+    avvisa(`Non riesco ad analizzare il file: ${err.message}`, true);
+  } finally {
+    chiudiAvanzamento();
+  }
+  caricaElencoContabile();
+}
+
+async function riapriContabile(id, nome) {
+  // Si rianalizza: le spedizioni intanto possono essere state consegnate o rese.
+  const stato = mostraAvanzamento(`Analizzo ${nome || 'il mese'}`);
+  try {
+    const { lavoro } = await api(`/api/contabilita/riapri/${id}`, { method: 'POST', body: '{}' });
+    const dati = await seguiLavoro(lavoro, stato, 0);
+    apriRisultatoContabile(dati, lavoro);
+  } catch (err) {
+    avvisa(`Non riesco ad aprire l’analisi: ${err.message}`, true);
+  } finally {
+    chiudiAvanzamento();
+  }
+  caricaElencoContabile();
+}
+
+function apriRisultatoContabile(dati, lavoro) {
+  S.contabilita.aperta = { dati, lavoro, filtri: { esito: '', controlli: false, testo: '' }, limite: 300, ordine: null };
+  window.scrollTo({ top: 0 });
+  disegnaAnalisiContabile();
+}
+
+// --- ordinamento: numeri, date gg/mm/aaaa e testo
+function valoreOrdinabile(v) {
+  const t = String(v ?? '').trim();
+  if (!t) return { tipo: 2, v: '' };
+  const data = t.match(/^(\d{2})\/(\d{2})\/(\d{4})(?: (\d{2}):(\d{2}))?$/);
+  if (data) return { tipo: 0, v: Number(`${data[3]}${data[2]}${data[1]}${data[4] || '00'}${data[5] || '00'}`) };
+  if (/^-?[\d.]*\d(,\d+)?$/.test(t)) return { tipo: 0, v: Number(t.replace(/\./g, '').replace(',', '.')) };
+  return { tipo: 1, v: t.toLocaleLowerCase('it') };
+}
+function confronta(a, b) {
+  const x = valoreOrdinabile(a); const y = valoreOrdinabile(b);
+  if (x.tipo !== y.tipo) return x.tipo - y.tipo;        // vuoti sempre in fondo
+  if (x.tipo === 1) return x.v.localeCompare(y.v, 'it', { numeric: true });
+  return x.v - y.v;
+}
+
+function disegnaAnalisiContabile() {
+  const vista = $('#vistaContabilita');
+  const a = S.contabilita.aperta; const d = a.dati; const r = d.riepilogo; const f = a.filtri;
   const colore = (k) => d.esiti[k]?.colore || '#eee';
-  const righe = d.righe.filter(x =>
+  let righe = d.righe.filter(x =>
     (!f.esito || x.esito === f.esito)
     && (!f.controlli || x.controlli.length)
     && (!f.testo || x.valori.concat([x.ordine, x.tracking]).some(v => String(v || '').toLowerCase().includes(f.testo.toLowerCase()))));
-  const mostrate = righe.slice(0, c.limite);
-  const iCosti = new Set(d.importi);
-  vista.innerHTML = `${testa}
+  const colonne = [
+    { chiave: 'esito', nome: 'Esito', valore: (x) => d.esiti[x.esito].nome },
+    ...d.intestazioni.map((h, i) => ({ chiave: `c${i}`, nome: h, valore: (x) => x.valori[i], numero: d.importi.includes(i) })),
+    { chiave: 'ordine', nome: 'Ordine', valore: (x) => x.ordine },
+    { chiave: 'stato', nome: 'Stato GLS', valore: (x) => x.stato_gls },
+    { chiave: 'controlli', nome: 'Controlli', valore: (x) => x.controlli.join('; ') },
+  ];
+  if (a.ordine) {
+    const col = colonne.find(c => c.chiave === a.ordine.chiave);
+    const verso = a.ordine.verso === 'asc' ? 1 : -1;
+    if (col) righe = righe.slice().sort((p, q) => {
+      const vuotoP = !String(col.valore(p) ?? '').trim(); const vuotoQ = !String(col.valore(q) ?? '').trim();
+      if (vuotoP !== vuotoQ) return vuotoP ? 1 : -1;
+      return confronta(col.valore(p), col.valore(q)) * verso;
+    });
+  }
+  const mostrate = righe.slice(0, a.limite);
+  const freccia = (chiave) => (a.ordine?.chiave === chiave ? ic(a.ordine.verso === 'asc' ? 'su' : 'giu') : '');
+  vista.innerHTML = `
+    <div class="titolo-vista">
+      <button type="button" class="indietro" id="cElenco">${ic('indietro')}Tutte le analisi</button>
+      <h1>${esc(String(d.nome_mese || '').toUpperCase())}</h1>
+    </div>
     <section class="riquadro esiti" aria-label="Riepilogo del file">
-      <div class="tra"><div class="in-linea"><span class="grande">${r.spedizioni}</span><span class="meta">spedizioni in ${esc(c.nome)} · ${r.trovate} riconosciute dal monitor · ${plurale(r.righe, 'riga', 'righe')}</span></div>
+      <div class="tra"><div class="in-linea"><span class="grande">${numeroIt(r.spedizioni)}</span><span class="meta">spedizioni · ${numeroIt(r.trovate)} riconosciute dal monitor · ${esc(d.nome_file)}</span></div>
         <div class="in-linea"><span class="meta">Totale costi</span><span class="grande">${euro(r.costo_totale)}</span></div></div>
       <div class="barra-esiti">${r.esiti.map(e => `<span style="flex:${e.righe};background:${colore(e.chiave)}" title="${esc(e.nome)}"></span>`).join('')}</div>
       <div class="schede-esiti">${r.esiti.map(e => `<button type="button" class="scheda-esito ${f.esito === e.chiave ? 'scelta-esito' : ''}" data-esito="${e.chiave}">
-          <i style="background:${colore(e.chiave)}"></i><span class="voce">${esc(e.nome)}</span><b>${e.righe}</b><span class="meta">${euro(e.costo)}</span></button>`).join('')}</div>
-      ${r.controlli.length ? `<div class="controlli-file"><strong>Da controllare</strong>${r.controlli.map(x => `<span>${ic('allarme')}${esc(x.nome)}: <b>${x.righe}</b></span>`).join('')}</div>`
-        : '<div class="meta">Nessuna anomalia: niente spedizioni doppie, contrassegni che tornano, nessun ordine annullato spedito.</div>'}
-      <div class="meta">Costi sommati dalle colonne: ${r.colonne_costo.map(esc).join(', ') || '—'}. ${r.colonne_importi.map(x => `${esc(x.nome)} ${euro(x.totale)}`).join(' · ')}</div>
+          <i style="background:${colore(e.chiave)}"></i><span class="voce">${esc(e.nome)}</span><b>${numeroIt(e.righe)}</b><span class="meta">${euro(e.costo)}</span></button>`).join('')}</div>
+      ${r.controlli.length ? `<div class="controlli-file"><strong>Da controllare</strong>${r.controlli.map(x => `<span>${ic('allarme')}${esc(x.nome)}: <b>${numeroIt(x.righe)}</b></span>`).join('')}</div>`
+        : '<div class="controlli-file tutto-bene"><strong>Niente da controllare</strong><span>nessuna spedizione doppia, contrassegni che tornano, nessun ordine annullato spedito</span></div>'}
     </section>
     <div class="filtri">
       <div class="cerca-chiara"><label for="cCerca" class="nascosto">Cerca nel file</label>${ic('cerca')}<input id="cCerca" type="search" placeholder="Spedizione, destinatario, ordine" value="${esc(f.testo)}"></div>
       <label class="pillola-scelta"><span class="nascosto">Esito</span><select id="cEsito" class="${f.esito ? 'attivo' : ''}"><option value="">Esito: tutti</option>${r.esiti.map(e => `<option value="${e.chiave}" ${f.esito === e.chiave ? 'selected' : ''}>${esc(e.nome)}</option>`).join('')}</select></label>
       <label class="pillola-spunta"><input type="checkbox" id="cControlli" ${f.controlli ? 'checked' : ''}> Solo da controllare</label>
       <span class="conteggio">${plurale(righe.length, 'riga', 'righe')} nella vista</span>
-      <button type="button" class="tasto esporta" id="cAltro">Carica un altro file</button>
       <button type="button" class="tasto esporta primo-piano" id="cScarica">${ic('giu')}Scarica il file analizzato</button>
     </div>
     <section class="riquadro tabella-file" aria-label="Spedizioni del file">
       <table>
-        <thead><tr><th>Esito</th>${d.intestazioni.map(h => `<th>${esc(h)}</th>`).join('')}<th>Ordine</th><th>Stato GLS</th><th>Controlli</th></tr></thead>
-        <tbody>${mostrate.map((x, i) => `<tr style="background:${colore(x.esito)}" ${x.tracking ? `data-tracking="${esc(x.tracking)}" tabindex="0"` : ''}>
-          <td><strong>${esc(d.esiti[x.esito].nome)}</strong><div class="piccolo">${esc(x.esito === 'giacenza' || x.esito === 'resa' ? x.dettaglio : (x.giacenze ? `${x.giacenze} passaggi in sede` : ''))}</div></td>
-          ${x.valori.map((v, j) => `<td class="${iCosti.has(j) ? 'numero-cella' : ''}">${esc(v)}</td>`).join('')}
-          <td>${esc(x.ordine)}</td><td class="stato-cella">${esc(x.stato_gls)}</td>
+        <thead><tr>${colonne.map(c => `<th><button type="button" class="ordina-colonna ${a.ordine?.chiave === c.chiave ? 'attiva' : ''}" data-ordina="${c.chiave}">${esc(c.nome)}${freccia(c.chiave)}</button></th>`).join('')}</tr></thead>
+        <tbody>${mostrate.map(x => `<tr style="background:${colore(x.esito)}" ${x.tracking ? `data-tracking="${esc(x.tracking)}" tabindex="0"` : ''}>
+          <td><strong>${esc(d.esiti[x.esito].nome)}</strong>${x.dettaglio && x.dettaglio !== d.esiti[x.esito].nome ? `<div class="piccolo">${esc(x.dettaglio)}</div>` : ''}</td>
+          ${x.valori.map((v, j) => `<td class="${d.importi.includes(j) ? 'numero-cella' : ''}">${esc(v)}</td>`).join('')}
+          <td>${esc(x.ordine)}</td><td class="stato-cella" title="${esc(x.stato_gls)}">${esc(x.stato_gls)}</td>
           <td class="controlli-cella">${x.controlli.map(esc).join('<br>')}</td></tr>`).join('')}</tbody>
       </table>
       ${righe.length > mostrate.length ? `<div class="piede-elenco"><button type="button" class="tasto" id="cAltre">Mostra altre ${Math.min(300, righe.length - mostrate.length)} di ${righe.length - mostrate.length}</button></div>` : ''}
     </section>`;
 
-  $('#cIndietro').addEventListener('click', () => vaiA(CODE.some(x => x.id === S.coda) ? S.coda : 'verificare'));
+  $('#cElenco').addEventListener('click', () => { S.contabilita.aperta = null; disegnaContabilita(); caricaElencoContabile(); });
   let attesa;
   $('#cCerca').addEventListener('input', (e) => {
     clearTimeout(attesa);
-    attesa = setTimeout(() => { f.testo = e.target.value; c.limite = 300; disegnaContabilita(); const x = $('#cCerca'); x.focus(); x.setSelectionRange(x.value.length, x.value.length); }, 250);
+    attesa = setTimeout(() => { f.testo = e.target.value; a.limite = 300; disegnaAnalisiContabile(); const x = $('#cCerca'); x.focus(); x.setSelectionRange(x.value.length, x.value.length); }, 250);
   });
-  $('#cEsito').addEventListener('change', (e) => { f.esito = e.target.value; c.limite = 300; disegnaContabilita(); });
-  $('#cControlli').addEventListener('change', (e) => { f.controlli = e.target.checked; c.limite = 300; disegnaContabilita(); });
-  $$('[data-esito]', vista).forEach(b => b.addEventListener('click', () => { f.esito = f.esito === b.dataset.esito ? '' : b.dataset.esito; c.limite = 300; disegnaContabilita(); }));
-  $('#cAltre')?.addEventListener('click', () => { c.limite += 300; disegnaContabilita(); });
-  $('#cAltro').addEventListener('click', () => { S.contabilita = null; disegnaContabilita(); });
+  $('#cEsito').addEventListener('change', (e) => { f.esito = e.target.value; a.limite = 300; disegnaAnalisiContabile(); });
+  $('#cControlli').addEventListener('change', (e) => { f.controlli = e.target.checked; a.limite = 300; disegnaAnalisiContabile(); });
+  $$('[data-esito]', vista).forEach(b => b.addEventListener('click', () => { f.esito = f.esito === b.dataset.esito ? '' : b.dataset.esito; a.limite = 300; disegnaAnalisiContabile(); }));
+  // Primo clic crescente, secondo decrescente, terzo torna all'ordine del file.
+  $$('[data-ordina]', vista).forEach(b => b.addEventListener('click', () => {
+    const chiave = b.dataset.ordina;
+    if (a.ordine?.chiave !== chiave) a.ordine = { chiave, verso: 'asc' };
+    else if (a.ordine.verso === 'asc') a.ordine.verso = 'desc';
+    else a.ordine = null;
+    disegnaAnalisiContabile();
+  }));
+  $('#cAltre')?.addEventListener('click', () => { a.limite += 300; disegnaAnalisiContabile(); });
   $('#cScarica').addEventListener('click', () => scaricaContabilita());
   $$('tr[data-tracking]', vista).forEach(tr => {
     tr.addEventListener('click', () => apriDettaglio(tr.dataset.tracking, tr));
@@ -1596,44 +1811,14 @@ function disegnaContabilita() {
   });
 }
 
-function collegaCaricamento() {
-  const zona = $('#cCarica'); const input = $('#cFile');
-  input.addEventListener('change', () => { if (input.files[0]) analizzaContabilita(input.files[0]); });
-  ['dragenter', 'dragover'].forEach(t => zona.addEventListener(t, (e) => { e.preventDefault(); zona.classList.add('trascina'); }));
-  ['dragleave', 'drop'].forEach(t => zona.addEventListener(t, (e) => { e.preventDefault(); zona.classList.remove('trascina'); }));
-  zona.addEventListener('drop', (e) => { const file = e.dataTransfer?.files?.[0]; if (file) analizzaContabilita(file); });
-}
-
-async function analizzaContabilita(file) {
-  S.contabilita = { nome: file.name, file, inCorso: true, dati: null, filtri: { esito: '', controlli: false, testo: '' }, limite: 300 };
-  disegnaContabilita();
-  try {
-    const risposta = await fetch(`/api/contabilita/analizza?nome=${encodeURIComponent(file.name)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file, cache: 'no-store',
-    });
-    if (risposta.status === 401) { location.replace('/login'); return; }
-    const corpo = await risposta.json().catch(() => ({}));
-    if (!risposta.ok) throw new Error(corpo.error || `Errore ${risposta.status}`);
-    S.contabilita.dati = corpo;
-    S.contabilita.inCorso = false;
-    avvisa(`${plurale(corpo.riepilogo.spedizioni, 'spedizione analizzata', 'spedizioni analizzate')}`);
-  } catch (err) {
-    S.contabilita = null;
-    avvisa(`Non riesco a leggere il file: ${err.message}`, true);
-  }
-  disegnaContabilita();
-}
-
 async function scaricaContabilita() {
-  const c = S.contabilita; if (!c?.file) return;
+  const a = S.contabilita?.aperta; if (!a) return;
   const tasto = $('#cScarica');
   tasto.disabled = true;
   const prima = tasto.innerHTML;
   tasto.lastChild.textContent = 'Preparo il file…';
   try {
-    const risposta = await fetch(`/api/contabilita/scarica?nome=${encodeURIComponent(c.nome)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: c.file, cache: 'no-store',
-    });
+    const risposta = await fetch(`/api/contabilita/scarica/${a.lavoro}`, { cache: 'no-store' });
     if (!risposta.ok) {
       let messaggio = `Errore ${risposta.status}`;
       try { messaggio = (await risposta.json()).error || messaggio; } catch {}
@@ -1973,6 +2158,7 @@ function collega() {
   });
   $('#apriRicerca').addEventListener('click', () => { const b = $('#ricercaBox'); b.classList.toggle('aperta'); if (b.classList.contains('aperta')) $('#cerca').focus(); });
   $('#sincronizza').addEventListener('click', sincronizza);
+  $('#apriContabilita').addEventListener('click', apriContabilita);
   $('#chatFab').addEventListener('click', alternaChat);
   $('#apriNovita').addEventListener('click', (e) => apriNovita(e.currentTarget));
   $('#apriAnalisi').addEventListener('click', (e) => apriAnalisi(e.currentTarget));

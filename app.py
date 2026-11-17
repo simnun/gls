@@ -122,6 +122,43 @@ def _momento_build() -> str:
         return ""
 
 
+LAVORI_CONTABILI = contabilita.Lavori()
+
+
+def _analisi_contabile(lavoro: str, nome: str, contenuto: bytes, operatore: str, analisi_id: int | None) -> None:
+    """Legge il file, lo confronta con il monitor, salva il riepilogo del mese."""
+    aggiorna = LAVORI_CONTABILI.aggiorna
+    aggiorna(lavoro, percentuale=1, fase="Apro il file")
+
+    def lettura(fatte: int, totale: int) -> None:
+        aggiorna(lavoro, percentuale=1 + 39 * fatte / max(totale, 1),
+                 fase=f"Leggo il file: {fatte:,} di {totale:,} righe".replace(",", "."))
+
+    intestazioni, righe = contabilita.leggi_file(nome, contenuto, lettura)
+    aggiorna(lavoro, percentuale=41, fase="Carico le spedizioni del monitor")
+    monitor = DB.spedizioni_per_contabilita()
+
+    def confronto(fatte: int, totale: int) -> None:
+        aggiorna(lavoro, percentuale=50 + 44 * fatte / max(totale, 1),
+                 fase=f"Confronto con il monitor: {fatte:,} di {totale:,} spedizioni".replace(",", "."))
+
+    aggiorna(lavoro, percentuale=50, fase="Confronto con il monitor")
+    analisi = contabilita.analizza(intestazioni, righe, monitor, confronto)
+    aggiorna(lavoro, percentuale=95, fase="Preparo il riepilogo")
+    schermo = contabilita.per_lo_schermo(analisi, intestazioni)
+    mese = contabilita.mese_del_file(intestazioni, righe) or datetime.now(ROME).strftime("%Y-%m")
+    breve = contabilita.riepilogo_breve(schermo)
+    if analisi_id:
+        DB.aggiorna_riepilogo_contabile(analisi_id, breve)
+    else:
+        analisi_id = DB.salva_analisi_contabile(mese, nome, contenuto, breve, operatore)
+    schermo.update({"analisi_id": analisi_id, "mese": mese, "nome_mese": contabilita.nome_mese(mese),
+                    "nome_file": nome})
+    base = "".join(ch for ch in contabilita.nome_mese(mese) if ch.isalnum() or ch in "-_ ").strip() or "spedizioni"
+    aggiorna(lavoro, percentuale=100, fase="Fatto", finito=True, risultato=schermo,
+             analisi=(intestazioni, analisi, base))
+
+
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "GLSExceptionMonitor/1.0"
 
@@ -332,6 +369,26 @@ class AppHandler(BaseHTTPRequestHandler):
             return self._serve_static("/nuova.html")
         if path in {"/classica", "/classica/"}:
             return self._serve_static("/index.html")
+
+        if path == "/api/contabilita/elenco":
+            return self._json({"analisi": DB.elenco_analisi_contabili()})
+
+        if path.startswith("/api/contabilita/lavoro/"):
+            stato = LAVORI_CONTABILI.stato(path.rsplit("/", 1)[-1])
+            if stato is None:
+                return self._json({"error": "Analisi scaduta: riaprila dall'elenco."}, 404)
+            return self._json(stato)
+
+        if path.startswith("/api/contabilita/scarica/"):
+            pronta = LAVORI_CONTABILI.analisi(path.rsplit("/", 1)[-1])
+            if not pronta:
+                return self._json({"error": "Analisi scaduta: riaprila dall'elenco e riscarica."}, 404)
+            intestazioni, analisi, nome = pronta
+            return self._bytes(
+                contabilita.file_analizzato(intestazioni, analisi),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                f"{nome.replace(' ', '_')}_analizzato.xlsx",
+            )
 
         if path == "/api/novita":
             dal = (parse_qs(parsed.query).get("dal") or [""])[0]
@@ -557,24 +614,31 @@ class AppHandler(BaseHTTPRequestHandler):
                     return self._json({"ok": False, "message": "Sincronizzazione gia in corso"}, 409)
                 return self._json({"ok": True, "message": "Sincronizzazione avviata"}, 202)
 
-            if path in {"/api/contabilita/analizza", "/api/contabilita/scarica"}:
+            if path == "/api/contabilita/carica":
                 # Il file del service arriva cosi' com'e', come corpo della
-                # richiesta: niente moduli multipart da decifrare.
-                nome = (parse_qs(parsed.query).get("nome") or ["file.xlsx"])[0]
+                # richiesta; l'analisi parte in sottofondo e la pagina ne segue
+                # l'avanzamento.
+                domanda = parse_qs(parsed.query)
+                nome = (domanda.get("nome") or ["file.xlsx"])[0][:120]
+                operatore = (domanda.get("operatore") or [""])[0][:60]
                 contenuto = self._read_bytes(limite=25 * 1024 * 1024)
-                try:
-                    intestazioni, righe = contabilita.leggi_file(nome, contenuto)
-                except contabilita.FileNonLeggibile as exc:
-                    return self._json({"error": str(exc)}, 400)
-                analisi = contabilita.analizza(intestazioni, righe, DB.spedizioni_per_contabilita())
-                if path.endswith("/analizza"):
-                    return self._json(contabilita.per_lo_schermo(analisi, intestazioni))
-                base = "".join(ch for ch in nome.rsplit(".", 1)[0] if ch.isalnum() or ch in "-_ ")[:60].strip()
-                return self._bytes(
-                    contabilita.file_analizzato(intestazioni, analisi),
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    f"{(base or 'spedizioni').replace(' ', '_')}_analizzato.xlsx",
-                )
+                if not contenuto:
+                    return self._json({"error": "Il file è vuoto."}, 400)
+                lavoro = LAVORI_CONTABILI.avvia(_analisi_contabile, nome, contenuto, operatore, None)
+                return self._json({"lavoro": lavoro})
+
+            if path.startswith("/api/contabilita/riapri/"):
+                analisi_id = int(path.rsplit("/", 1)[-1])
+                salvata = DB.analisi_contabile(analisi_id)
+                if not salvata:
+                    return self._json({"error": "Analisi non trovata"}, 404)
+                lavoro = LAVORI_CONTABILI.avvia(_analisi_contabile, salvata["nome_file"], salvata["contenuto"],
+                                                salvata.get("caricato_da") or "", analisi_id)
+                return self._json({"lavoro": lavoro})
+
+            if path.startswith("/api/contabilita/elimina/"):
+                DB.elimina_analisi_contabile(int(path.rsplit("/", 1)[-1]))
+                return self._json({"ok": True})
 
             if path == "/api/stocks/export.xlsx":
                 # Come per le spedizioni: le giacenze filtrate a schermo, in ordine.

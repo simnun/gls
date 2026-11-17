@@ -71,23 +71,27 @@ def importo(valore: Any) -> float | None:
 # ---------------------------------------------------------------- lettura
 
 
-def leggi_file(nome: str, contenuto: bytes) -> tuple[list[str], list[list[Any]]]:
-    """Intestazioni e righe del primo foglio, da .xlsx, .xls o .csv."""
+def leggi_file(nome: str, contenuto: bytes, avanzamento: Any = None) -> tuple[list[str], list[list[Any]]]:
+    """Intestazioni e righe del primo foglio, da .xlsx, .xls o .csv.
+
+    avanzamento(fatte, totale) viene chiamata mentre si leggono le righe.
+    """
+    avanzamento = avanzamento or (lambda fatte, totale: None)
     estensione = (nome or "").lower().rsplit(".", 1)[-1]
     if not contenuto:
         raise FileNonLeggibile("Il file è vuoto.")
     if estensione in {"xlsx", "xlsm"} or contenuto[:2] == b"PK":
-        tabella = _leggi_xlsx(contenuto)
+        tabella = _leggi_xlsx(contenuto, avanzamento)
     elif estensione == "xls" or contenuto[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-        tabella = _leggi_xls(contenuto)
+        tabella = _leggi_xls(contenuto, avanzamento)
     elif estensione in {"csv", "txt", ""}:
-        tabella = _leggi_csv(contenuto)
+        tabella = _leggi_csv(contenuto, avanzamento)
     else:
         raise FileNonLeggibile("Formato non riconosciuto: carica il file in Excel (.xlsx o .xls) o in CSV.")
     return _separa_intestazione(tabella)
 
 
-def _leggi_xlsx(contenuto: bytes) -> list[list[Any]]:
+def _leggi_xlsx(contenuto: bytes, avanzamento: Any) -> list[list[Any]]:
     try:
         import openpyxl
     except ImportError as exc:  # pragma: no cover - dipende dall'installazione
@@ -98,12 +102,19 @@ def _leggi_xlsx(contenuto: bytes) -> list[list[Any]]:
         raise FileNonLeggibile("Il file Excel non si apre: prova a salvarlo di nuovo in .xlsx.") from exc
     try:
         foglio = libro.worksheets[0]
-        return [list(riga) for riga in foglio.iter_rows(values_only=True)]
+        totale = foglio.max_row or 0
+        righe = []
+        for riga in foglio.iter_rows(values_only=True):
+            righe.append(list(riga))
+            if len(righe) % 100 == 0:
+                avanzamento(len(righe), max(totale, len(righe)))
+        avanzamento(len(righe), len(righe))
+        return righe
     finally:
         libro.close()
 
 
-def _leggi_xls(contenuto: bytes) -> list[list[Any]]:
+def _leggi_xls(contenuto: bytes, avanzamento: Any) -> list[list[Any]]:
     try:
         import xlrd
     except ImportError as exc:  # pragma: no cover
@@ -126,10 +137,13 @@ def _leggi_xls(contenuto: bytes) -> list[list[Any]]:
                     pass
             riga.append(cella.value if cella.value != "" else None)
         righe.append(riga)
+        if r % 100 == 0:
+            avanzamento(r, foglio.nrows)
+    avanzamento(foglio.nrows, foglio.nrows)
     return righe
 
 
-def _leggi_csv(contenuto: bytes) -> list[list[Any]]:
+def _leggi_csv(contenuto: bytes, avanzamento: Any) -> list[list[Any]]:
     for codifica in ("utf-8-sig", "cp1252", "latin-1"):
         try:
             testo = contenuto.decode(codifica)
@@ -139,9 +153,13 @@ def _leggi_csv(contenuto: bytes) -> list[list[Any]]:
     try:
         dialetto = csv.Sniffer().sniff(testo[:5000], delimiters=";,\t|")
     except csv.Error:
-        dialetto = csv.excel
-        dialetto.delimiter = ";" if testo.count(";") > testo.count(",") else ","
-    return [[c if c != "" else None for c in riga] for riga in csv.reader(io.StringIO(testo), dialetto)]
+        # Una sottoclasse, non csv.excel: cambiarne il separatore varrebbe
+        # per tutto il programma.
+        class dialetto(csv.excel):
+            delimiter = ";" if testo.count(";") > testo.count(",") else ","
+    righe = [[c if c != "" else None for c in riga] for riga in csv.reader(io.StringIO(testo), dialetto)]
+    avanzamento(len(righe), len(righe))
+    return righe
 
 
 def _separa_intestazione(tabella: list[list[Any]]) -> tuple[list[str], list[list[Any]]]:
@@ -205,6 +223,47 @@ def riconosci_colonne(intestazioni: list[str], righe: list[list[Any]]) -> dict[s
             "costi": [i for i in importi if e_costo(i)], "contrassegno": contrassegno}
 
 
+MESI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
+        "settembre", "ottobre", "novembre", "dicembre"]
+
+
+def _data(valore: Any) -> date | None:
+    if isinstance(valore, datetime):
+        return valore.date()
+    if isinstance(valore, date):
+        return valore
+    testo = str(valore or "").strip()[:10]
+    for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(testo, formato).date()
+        except ValueError:
+            continue
+    return None
+
+
+def mese_del_file(intestazioni: list[str], righe: list[list[Any]]) -> str | None:
+    """Il mese a cui si riferisce il file (AAAA-MM): quello piu' presente nelle date."""
+    colonna = next((i for i, n in enumerate(intestazioni) if _norma(n).startswith("data")), None)
+    if colonna is None:
+        return None
+    conteggio: dict[str, int] = {}
+    for r in righe:
+        giorno = _data(r[colonna])
+        if giorno:
+            chiave = f"{giorno.year:04d}-{giorno.month:02d}"
+            conteggio[chiave] = conteggio.get(chiave, 0) + 1
+    return max(conteggio, key=conteggio.get) if conteggio else None
+
+
+def nome_mese(mese: str) -> str:
+    """"2026-10" -> "Ottobre 2026"."""
+    try:
+        anno, numero = mese.split("-")
+        return f"{MESI[int(numero) - 1].capitalize()} {anno}"
+    except (ValueError, IndexError):
+        return mese
+
+
 # ---------------------------------------------------------------- analisi
 
 
@@ -219,9 +278,8 @@ def _esito(info: dict[str, Any] | None) -> tuple[str, str]:
     if int(info.get("giacenza_aperta") or 0) or categoria == "STORAGE":
         return "giacenza", "Ancora ferma in sede GLS"
     if categoria == "DELIVERED":
-        if giacenze:
-            return "giacenza", "Consegnata dopo una giacenza"
-        return "consegnata", "Consegnata"
+        # Verde anche dopo una giacenza: conta com'e' finita.
+        return "consegnata", "Consegnata dopo una giacenza" if giacenze else "Consegnata"
     if str(info.get("order_cancelled_at") or "").strip():
         return "annullato", "Ordine annullato su Shopify"
     if categoria in PROBLEMI:
@@ -230,8 +288,9 @@ def _esito(info: dict[str, Any] | None) -> tuple[str, str]:
 
 
 def analizza(intestazioni: list[str], righe: list[list[Any]],
-             monitor: dict[str, dict[str, Any]]) -> dict[str, Any]:
+             monitor: dict[str, dict[str, Any]], avanzamento: Any = None) -> dict[str, Any]:
     """Riga per riga: com'e' andata, colore, controlli; piu' il riepilogo."""
+    avanzamento = avanzamento or (lambda fatte, totale: None)
     colonne = riconosci_colonne(intestazioni, righe)
     i_sped, i_serv, i_cod = colonne["spedizione"], colonne["servizio"], colonne["contrassegno"]
     per_cifre = {}
@@ -288,6 +347,8 @@ def analizza(intestazioni: list[str], righe: list[list[Any]],
             "valori": r, "esito": chiave_esito, "dettaglio": dettaglio, "costo": costo,
             "controlli": controlli, "info": info,
         })
+        if len(analizzate) % 100 == 0:
+            avanzamento(len(analizzate), len(righe))
     return {
         "colonne": colonne,
         "righe": analizzate,
@@ -365,3 +426,81 @@ def per_lo_schermo(analisi: dict[str, Any], intestazioni: list[str]) -> dict[str
     return {"intestazioni": intestazioni, "importi": sorted(importi), "righe": righe,
             "riepilogo": analisi["riepilogo"],
             "esiti": {k: {"nome": v["nome"], "colore": "#" + v["colore"][2:]} for k, v in ESITI.items()}}
+
+
+# ---------------------------------------------------------------- lavori
+
+
+class Lavori:
+    """Analisi che girano in sottofondo, con la percentuale reale.
+
+    La pagina chiede a che punto sono ogni mezzo secondo. Restano in memoria
+    le ultime, per poter scaricare il file analizzato senza rifare tutto.
+    """
+
+    def __init__(self, tenuti: int = 4) -> None:
+        import threading
+
+        self._lavori: dict[str, dict[str, Any]] = {}
+        self._ordine: list[str] = []
+        self._lock = threading.Lock()
+        self._tenuti = tenuti
+
+    def avvia(self, funzione: Any, *argomenti: Any) -> str:
+        import threading
+        import time
+        import uuid
+
+        chiave = uuid.uuid4().hex[:12]
+        with self._lock:
+            self._lavori[chiave] = {"percentuale": 0.0, "fase": "In partenza", "iniziato": time.time(),
+                                    "finito": False, "errore": None, "risultato": None, "analisi": None}
+            self._ordine.append(chiave)
+            while len(self._ordine) > self._tenuti:
+                self._lavori.pop(self._ordine.pop(0), None)
+
+        def esegui() -> None:
+            try:
+                funzione(chiave, *argomenti)
+            except FileNonLeggibile as exc:
+                self.aggiorna(chiave, finito=True, errore=str(exc))
+            except Exception as exc:  # pragma: no cover - mostrato all'operatore
+                self.aggiorna(chiave, finito=True, errore=f"{type(exc).__name__}: {exc}")
+
+        threading.Thread(target=esegui, daemon=True).start()
+        return chiave
+
+    def aggiorna(self, chiave: str, **campi: Any) -> None:
+        with self._lock:
+            if chiave in self._lavori:
+                self._lavori[chiave].update(campi)
+
+    def stato(self, chiave: str) -> dict[str, Any] | None:
+        import time
+
+        with self._lock:
+            lavoro = self._lavori.get(chiave)
+            if not lavoro:
+                return None
+            trascorsi = time.time() - lavoro["iniziato"]
+            percentuale = float(lavoro["percentuale"])
+            # Tempo rimanente stimato dal ritmo misurato finora.
+            rimanenti = None
+            if 2 <= percentuale < 100:
+                rimanenti = round(trascorsi / percentuale * (100 - percentuale))
+            return {"percentuale": round(percentuale, 1), "fase": lavoro["fase"], "secondi_trascorsi": round(trascorsi),
+                    "secondi_rimanenti": rimanenti, "finito": lavoro["finito"], "errore": lavoro["errore"],
+                    "risultato": lavoro["risultato"] if lavoro["finito"] else None}
+
+    def analisi(self, chiave: str) -> Any:
+        with self._lock:
+            lavoro = self._lavori.get(chiave)
+            return lavoro.get("analisi") if lavoro else None
+
+
+def riepilogo_breve(schermo: dict[str, Any]) -> dict[str, Any]:
+    """Quello che serve alla riga del mese nell'elenco delle analisi."""
+    r = schermo["riepilogo"]
+    return {"righe": r["righe"], "spedizioni": r["spedizioni"], "trovate": r["trovate"],
+            "costo_totale": r["costo_totale"], "esiti": r["esiti"],
+            "controlli": sum(1 for riga in schermo["righe"] if riga["controlli"])}
