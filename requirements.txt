@@ -10,3 +10,8 @@ tzdata==2026.1
 # articolata a Claude. Senza chiave API non viene nemmeno importato, cosi' su
 # un servizio da 512 MB non pesa finche' non lo si usa davvero.
 anthropic==2.3.0
+
+# Contabilita': lettura del file delle spedizioni mandato dal service del
+# corriere (.xlsx e vecchio .xls). Importati solo quando si carica un file.
+openpyxl==3.1.5
+xlrd==2.0.1

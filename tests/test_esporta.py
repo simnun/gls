@@ -64,7 +64,7 @@ class EsportaTests(unittest.TestCase):
     def test_numeri_e_date_restano_numeri_e_date_in_excel(self):
         xml = foglio(build_xlsx(["Importo", "Quando", "Testo", "Cod"],
                                 [[69.72, datetime(2026, 11, 3, 9, 30), "ciao", True]]))
-        self.assertIn('<c r="A2"><v>69.72</v></c>', xml)
+        self.assertIn('<c r="A2" s="4"><v>69.72</v></c>', xml)
         self.assertRegex(xml, r'<c r="B2" s="2"><v>46329\.39\d+</v></c>')
         self.assertIn("ciao", xml)
         self.assertIn(">Si<", xml)

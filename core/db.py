@@ -1142,6 +1142,35 @@ class Database:
             )
         return int(cur.lastrowid)
 
+    def spedizioni_per_contabilita(self) -> dict[str, dict[str, Any]]:
+        """Tutte le spedizioni seguite, per numero (solo cifre) del tracking.
+
+        Il file del service scrive il numero senza il prefisso ("665108435"),
+        il monitor con ("NI665108435"): si confrontano le cifre.
+        """
+        with self.connect() as conn:
+            righe = conn.execute(
+                """SELECT s.tracking_number, s.order_name, s.customer_name, s.category, s.gls_status,
+                          s.gls_event_at, s.closed, s.is_cod, s.total_amount, s.currency, s.order_cancelled_at,
+                          s.workflow_status,
+                          COALESCE(g.giacenze, 0) AS giacenze, COALESCE(g.passaggi, 0) AS passaggi,
+                          COALESCE(g.aperte, 0) AS giacenza_aperta
+                   FROM shipments s
+                   LEFT JOIN (
+                       SELECT tracking_number, COUNT(*) AS giacenze, SUM(COALESCE(passaggi, 1)) AS passaggi,
+                              SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS aperte
+                       FROM stock_cases GROUP BY tracking_number
+                   ) g ON g.tracking_number=s.tracking_number"""
+            ).fetchall()
+        fuori: dict[str, dict[str, Any]] = {}
+        for riga in righe:
+            info = dict(riga)
+            info["is_cod"] = bool(info.get("is_cod"))
+            cifre = "".join(ch for ch in str(info["tracking_number"]) if ch.isdigit())
+            if cifre:
+                fuori[cifre] = info
+        return fuori
+
     def spedizioni_per_export(self, trackings: list[str]) -> list[dict[str, Any]]:
         """Le spedizioni indicate, nell'ordine dato, con giacenze e svincoli contati.
 

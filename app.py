@@ -28,6 +28,7 @@ from core.assistente_ai import Collaboratore
 from core.db import Database
 from core.timezones import ROME
 from core.sync import SyncEngine
+from core import contabilita
 from core.esporta import righe_giacenze, righe_spedizioni
 from core.xlsx_export import build_xlsx
 
@@ -277,6 +278,13 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
+
+    def _read_bytes(self, limite: int) -> bytes:
+        """Il corpo grezzo della richiesta, per i file caricati."""
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length > limite:
+            raise ValueError("File troppo grande")
+        return self.rfile.read(length) if length else b""
 
     def _read_json(self, limite: int = 64 * 1024) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
@@ -548,6 +556,25 @@ class AppHandler(BaseHTTPRequestHandler):
                 if not started:
                     return self._json({"ok": False, "message": "Sincronizzazione gia in corso"}, 409)
                 return self._json({"ok": True, "message": "Sincronizzazione avviata"}, 202)
+
+            if path in {"/api/contabilita/analizza", "/api/contabilita/scarica"}:
+                # Il file del service arriva cosi' com'e', come corpo della
+                # richiesta: niente moduli multipart da decifrare.
+                nome = (parse_qs(parsed.query).get("nome") or ["file.xlsx"])[0]
+                contenuto = self._read_bytes(limite=25 * 1024 * 1024)
+                try:
+                    intestazioni, righe = contabilita.leggi_file(nome, contenuto)
+                except contabilita.FileNonLeggibile as exc:
+                    return self._json({"error": str(exc)}, 400)
+                analisi = contabilita.analizza(intestazioni, righe, DB.spedizioni_per_contabilita())
+                if path.endswith("/analizza"):
+                    return self._json(contabilita.per_lo_schermo(analisi, intestazioni))
+                base = "".join(ch for ch in nome.rsplit(".", 1)[0] if ch.isalnum() or ch in "-_ ")[:60].strip()
+                return self._bytes(
+                    contabilita.file_analizzato(intestazioni, analisi),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    f"{(base or 'spedizioni').replace(' ', '_')}_analizzato.xlsx",
+                )
 
             if path == "/api/stocks/export.xlsx":
                 # Come per le spedizioni: le giacenze filtrate a schermo, in ordine.
