@@ -638,3 +638,5 @@ h1, h2, h3, b, strong { font-weight: 600; }
 .ordina-colonna:hover, .ordina-colonna.attiva { color: var(--testo); }
 .ordina-colonna svg { width: 12px; height: 12px; flex: none; }
 .tabella-file td:first-child { white-space: normal; min-width: 180px; max-width: 320px; }
+.negozi-file { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 14px; color: var(--testo-2); }
+.negozi-file strong { color: var(--testo); }

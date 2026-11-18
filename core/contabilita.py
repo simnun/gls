@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import re
 import unicodedata
 from datetime import date, datetime
@@ -26,11 +27,16 @@ ESITI = {
     "problema": {"nome": "Con un problema in corso", "colore": "FFF8CBAD"},
     "viaggio": {"nome": "In viaggio", "colore": "FFDDEBF7"},
     "annullato": {"nome": "Ordine annullato", "colore": "FFE4DFEC"},
-    "sconosciuta": {"nome": "Non trovata nel monitor", "colore": "FFEDEDED"},
+    "sconosciuta": {"nome": "Non trovata", "colore": "FFEDEDED"},
 }
 PROBLEMI = {"ADDRESS_ERROR", "ABSENT", "REFUSED", "COD_ISSUE", "DELIVERY_FAILURE", "DAMAGE_OR_LOSS",
             "RECIPIENT_CLOSED", "PICKUP_AT_DEPOT", "ACTION_REQUIRED", "DELIVERY_RETRY", "UNCLASSIFIED"}
-COLONNE_AGGIUNTE = ["Esito monitor", "Dettaglio", "Ordine Shopify", "Stato GLS", "Ultimo evento GLS",
+# Il monitor segue gli ordini di un negozio Shopify; le spedizioni dell'altro
+# negozio, che viaggiano con lo stesso contratto GLS, si tracciano a parte.
+NEGOZIO = os.environ.get("NEGOZIO_NOME", "Zuiki").strip() or "Zuiki"
+ALTRO_NEGOZIO = os.environ.get("ALTRO_NEGOZIO_NOME", "LoveSkin").strip() or "LoveSkin"
+
+COLONNE_AGGIUNTE = ["Esito monitor", "Negozio", "Dettaglio", "Ordine Shopify", "Stato GLS", "Ultimo evento GLS",
                     "Giacenze", "Pagamento ordine", "Controlli"]
 
 
@@ -270,7 +276,7 @@ def nome_mese(mese: str) -> str:
 def _esito(info: dict[str, Any] | None) -> tuple[str, str]:
     """Chiave dell'esito e una frase che lo spiega."""
     if not info:
-        return "sconosciuta", "Spedizione non presente fra quelle seguite dal monitor"
+        return "sconosciuta", "Non trovata né nel monitor né su GLS"
     categoria = str(info.get("category") or "").upper()
     giacenze = int(info.get("giacenze") or 0)
     if categoria == "RETURN":
@@ -285,6 +291,24 @@ def _esito(info: dict[str, Any] | None) -> tuple[str, str]:
     if categoria in PROBLEMI:
         return "problema", info.get("gls_status") or "Problema di consegna"
     return "viaggio", info.get("gls_status") or "In viaggio"
+
+
+def negozio(info: dict[str, Any] | None) -> str:
+    if not info:
+        return ""
+    return info.get("negozio") or NEGOZIO
+
+
+def non_trovate(intestazioni: list[str], righe: list[list[Any]], monitor: dict[str, dict[str, Any]]) -> list[str]:
+    """I numeri del file che il monitor non segue (le cifre, senza doppioni)."""
+    i_sped = riconosci_colonne(intestazioni, righe)["spedizione"]
+    note = set(monitor) | {k[-9:] for k in monitor if len(k) > 9}
+    fuori = []
+    for r in righe:
+        cifre = _cifre(r[i_sped])
+        if cifre and cifre not in note and cifre[-9:] not in note:
+            fuori.append(cifre)
+    return list(dict.fromkeys(fuori))
 
 
 def analizza(intestazioni: list[str], righe: list[list[Any]],
@@ -317,6 +341,7 @@ def analizza(intestazioni: list[str], righe: list[list[Any]],
     totali_colonne = {intestazioni[i]: 0.0 for i in colonne["importi"]}
     controlli_totali: dict[str, int] = {}
     spedizioni = set()
+    negozi: dict[str, dict[str, Any]] = {}
     for r in righe:
         info = trova(r[i_sped])
         chiave_esito, dettaglio = _esito(info)
@@ -330,7 +355,8 @@ def analizza(intestazioni: list[str], righe: list[list[Any]],
         volte = conteggio.get((cifre, _norma(r[i_serv]) if i_serv is not None else ""), 0)
         if volte > 1:
             controlli.append(f"Fatturata {volte} volte nel file")
-        if info and i_cod is not None:
+        # Per l'altro negozio il pagamento si sa solo quando GLS lo dice.
+        if info and i_cod is not None and info.get("is_cod") is not None:
             addebito = importo(r[i_cod]) or 0.0
             if addebito > 0 and not info.get("is_cod"):
                 controlli.append("Contrassegno in fattura, ma l’ordine non è in contrassegno")
@@ -343,6 +369,10 @@ def analizza(intestazioni: list[str], righe: list[list[Any]],
             controlli_totali[chiave_c] = controlli_totali.get(chiave_c, 0) + 1
         riepilogo_esiti[chiave_esito]["righe"] += 1
         riepilogo_esiti[chiave_esito]["costo"] += costo
+        if info:
+            n = negozi.setdefault(negozio(info), {"spedizioni": set(), "costo": 0.0})
+            n["spedizioni"].add(cifre)
+            n["costo"] += costo
         analizzate.append({
             "valori": r, "esito": chiave_esito, "dettaglio": dettaglio, "costo": costo,
             "controlli": controlli, "info": info,
@@ -362,6 +392,8 @@ def analizza(intestazioni: list[str], righe: list[list[Any]],
             "colonne_importi": [{"nome": n, "totale": round(t, 2)} for n, t in totali_colonne.items()],
             "colonne_costo": [intestazioni[i] for i in colonne["costi"]],
             "controlli": [{"nome": n, "righe": q} for n, q in sorted(controlli_totali.items(), key=lambda x: -x[1])],
+            "negozi": [{"nome": nome, "spedizioni": len(v["spedizioni"]), "costo": round(v["costo"], 2)}
+                       for nome, v in sorted(negozi.items(), key=lambda x: (x[0] != NEGOZIO, x[0]))],
         },
     }
 
@@ -379,10 +411,10 @@ def colonne_aggiunte(riga: dict[str, Any], quando_gls: Any = None) -> list[Any]:
     info = riga["info"] or {}
     giacenze = int(info.get("passaggi") or info.get("giacenze") or 0)
     pagamento = ""
-    if info:
+    if info and info.get("is_cod") is not None:
         pagamento = "Contrassegno" if info.get("is_cod") else "Pagato online"
     return [
-        ESITI[riga["esito"]]["nome"], riga["dettaglio"], info.get("order_name") or "",
+        ESITI[riga["esito"]]["nome"], negozio(info), riga["dettaglio"], info.get("order_name") or "",
         info.get("gls_status") or "", quando_gls if quando_gls is not None else (info.get("gls_event_at") or ""),
         (f"{giacenze} {'passaggio' if giacenze == 1 else 'passaggi'} in sede" if giacenze else ""),
         pagamento, "; ".join(riga["controlli"]),
@@ -418,10 +450,12 @@ def per_lo_schermo(analisi: dict[str, Any], intestazioni: list[str]) -> dict[str
         info = a["info"] or {}
         righe.append({
             "valori": valori, "esito": a["esito"], "dettaglio": a["dettaglio"], "costo": a["costo"],
-            "controlli": a["controlli"], "tracking": info.get("tracking_number") or "",
+            "controlli": a["controlli"], "negozio": negozio(info),
+            # Il dettaglio si apre solo per le spedizioni che il monitor segue.
+            "tracking": "" if info.get("negozio") else (info.get("tracking_number") or ""),
             "ordine": info.get("order_name") or "", "stato_gls": info.get("gls_status") or "",
             "giacenze": int(info.get("passaggi") or info.get("giacenze") or 0),
-            "contrassegno": bool(info.get("is_cod")) if info else None,
+            "contrassegno": info.get("is_cod") if info and info.get("is_cod") is not None else None,
         })
     return {"intestazioni": intestazioni, "importi": sorted(importi), "righe": righe,
             "riepilogo": analisi["riepilogo"],
@@ -502,5 +536,5 @@ def riepilogo_breve(schermo: dict[str, Any]) -> dict[str, Any]:
     """Quello che serve alla riga del mese nell'elenco delle analisi."""
     r = schermo["riepilogo"]
     return {"righe": r["righe"], "spedizioni": r["spedizioni"], "trovate": r["trovate"],
-            "costo_totale": r["costo_totale"], "esiti": r["esiti"],
+            "costo_totale": r["costo_totale"], "esiti": r["esiti"], "negozi": r.get("negozi", []),
             "controlli": sum(1 for riga in schermo["righe"] if riga["controlli"])}

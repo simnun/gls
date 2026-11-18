@@ -281,6 +281,21 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_sync_errors_sync ON sync_errors(sync_id, error_code);
 
+                -- Spedizioni dell'altro negozio, che il monitor non segue: le
+                -- traccia la contabilita' direttamente su GLS e ne tiene l'esito.
+                CREATE TABLE IF NOT EXISTS spedizioni_esterne (
+                    numero TEXT PRIMARY KEY,
+                    category TEXT,
+                    gls_status TEXT,
+                    gls_note TEXT,
+                    gls_event_at TEXT,
+                    giacenze INTEGER NOT NULL DEFAULT 0,
+                    is_cod INTEGER,
+                    closed INTEGER NOT NULL DEFAULT 0,
+                    errore TEXT,
+                    aggiornato_il TEXT NOT NULL
+                );
+
                 -- Contabilita': il file del service di ogni mese, cosi' com'e'
                 -- arrivato, e il riepilogo dell'ultima analisi. Uno per mese.
                 CREATE TABLE IF NOT EXISTS analisi_contabili (
@@ -1154,6 +1169,33 @@ class Database:
                 (action_label, now, operator_name, tracking_number),
             )
         return int(cur.lastrowid)
+
+    def spedizioni_esterne(self, numeri: list[str]) -> dict[str, dict[str, Any]]:
+        """Le spedizioni dell'altro negozio gia' tracciate, per numero."""
+        fuori: dict[str, dict[str, Any]] = {}
+        with self.connect() as conn:
+            for inizio in range(0, len(numeri), 500):
+                blocco = numeri[inizio:inizio + 500]
+                segnaposti = ",".join("?" for _ in blocco)
+                for riga in conn.execute(f"SELECT * FROM spedizioni_esterne WHERE numero IN ({segnaposti})", blocco):
+                    fuori[riga["numero"]] = dict(riga)
+        return fuori
+
+    def salva_spedizione_esterna(self, riga: dict[str, Any]) -> None:
+        campi = ["numero", "category", "gls_status", "gls_note", "gls_event_at", "giacenze", "is_cod", "closed",
+                 "errore", "aggiornato_il"]
+        valori = [riga.get(c) for c in campi]
+        valori[campi.index("giacenze")] = int(riga.get("giacenze") or 0)
+        valori[campi.index("closed")] = 1 if riga.get("closed") else 0
+        cod = riga.get("is_cod")
+        valori[campi.index("is_cod")] = None if cod is None else (1 if cod else 0)
+        aggiorna = ",".join(f"{c}=excluded.{c}" for c in campi[1:])
+        with self.connect() as conn:
+            conn.execute(
+                f"""INSERT INTO spedizioni_esterne({",".join(campi)}) VALUES({",".join("?" for _ in campi)})
+                    ON CONFLICT(numero) DO UPDATE SET {aggiorna}""",
+                valori,
+            )
 
     def salva_analisi_contabile(self, mese: str, nome_file: str, contenuto: bytes,
                                 riepilogo: dict[str, Any], operatore: str = "") -> int:

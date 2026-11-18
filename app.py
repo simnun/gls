@@ -131,18 +131,33 @@ def _analisi_contabile(lavoro: str, nome: str, contenuto: bytes, operatore: str,
     aggiorna(lavoro, percentuale=1, fase="Apro il file")
 
     def lettura(fatte: int, totale: int) -> None:
-        aggiorna(lavoro, percentuale=1 + 39 * fatte / max(totale, 1),
+        aggiorna(lavoro, percentuale=1 + 24 * fatte / max(totale, 1),
                  fase=f"Leggo il file: {fatte:,} di {totale:,} righe".replace(",", "."))
 
     intestazioni, righe = contabilita.leggi_file(nome, contenuto, lettura)
-    aggiorna(lavoro, percentuale=41, fase="Carico le spedizioni del monitor")
+    aggiorna(lavoro, percentuale=26, fase="Carico le spedizioni del monitor")
     monitor = DB.spedizioni_per_contabilita()
 
+    # Quelle che il monitor non segue sono dell'altro negozio: si tracciano
+    # su GLS, con lo stesso contratto.
+    esterne = contabilita.non_trovate(intestazioni, righe, monitor)
+    if esterne:
+        def tracciamento(fatte: int, totale: int) -> None:
+            aggiorna(lavoro, percentuale=28 + 60 * fatte / max(totale, 1),
+                     fase=(f"Traccio su GLS le spedizioni {contabilita.ALTRO_NEGOZIO}: "
+                           f"{fatte:,} di {totale:,}").replace(",", "."))
+
+        aggiorna(lavoro, percentuale=28, fase=f"Traccio su GLS le spedizioni {contabilita.ALTRO_NEGOZIO}")
+        try:
+            monitor = {**monitor, **ENGINE.risolvi().traccia_esterne(esterne, tracciamento)}
+        except Exception as exc:  # GLS giu': l'analisi resta utile anche senza
+            print(f"[contabilita] tracciamento delle spedizioni esterne non riuscito: {exc}", flush=True)
+
     def confronto(fatte: int, totale: int) -> None:
-        aggiorna(lavoro, percentuale=50 + 44 * fatte / max(totale, 1),
+        aggiorna(lavoro, percentuale=89 + 5 * fatte / max(totale, 1),
                  fase=f"Confronto con il monitor: {fatte:,} di {totale:,} spedizioni".replace(",", "."))
 
-    aggiorna(lavoro, percentuale=50, fase="Confronto con il monitor")
+    aggiorna(lavoro, percentuale=89, fase="Confronto con il monitor")
     analisi = contabilita.analizza(intestazioni, righe, monitor, confronto)
     aggiorna(lavoro, percentuale=95, fase="Preparo il riepilogo")
     schermo = contabilita.per_lo_schermo(analisi, intestazioni)

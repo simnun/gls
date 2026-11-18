@@ -599,6 +599,94 @@ class SyncEngine:
         except Exception:
             return None
 
+    # Le spedizioni ancora in viaggio si richiedono a GLS dopo questo tempo;
+    # quelle consegnate o rese non piu'.
+    FRESCHEZZA_ESTERNE = timedelta(hours=2)
+
+    def traccia_esterne(self, numeri: list[str], avanzamento: Any = None) -> dict[str, dict[str, Any]]:
+        """Traccia su GLS le spedizioni che il monitor non segue (l'altro negozio).
+
+        Restituisce, per numero, le informazioni nella stessa forma di
+        Database.spedizioni_per_contabilita, con in piu' il negozio.
+        """
+        from .contabilita import ALTRO_NEGOZIO, importo
+
+        avanzamento = avanzamento or (lambda fatte, totale: None)
+        numeri = list(dict.fromkeys(n for n in numeri if n))
+        salvate = self.db.spedizioni_esterne(numeri)
+        adesso = datetime.now(timezone.utc)
+
+        def fresca(riga: dict[str, Any] | None) -> bool:
+            if not riga:
+                return False
+            if riga.get("closed"):
+                return True
+            quando = _parse_iso(riga.get("aggiornato_il"))
+            return bool(quando and adesso - quando < self.FRESCHEZZA_ESTERNE)
+
+        da_chiedere = [n for n in numeri if not fresca(salvate.get(n))]
+        if da_chiedere and self.config.gls_tracking_configured and not self.config.mock_mode:
+            avanzamento(0, len(da_chiedere))
+            workers = max(1, min(self.config.sync_workers, len(da_chiedere)))
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gls-esterne") as pool:
+                futuri = {pool.submit(self.gls.track, n): n for n in da_chiedere}
+                for fatte, futuro in enumerate(as_completed(futuri), start=1):
+                    numero = futuri[futuro]
+                    try:
+                        riga = self._riga_esterna(numero, futuro.result(), importo)
+                    except Exception as exc:
+                        # Si tiene l'ultimo esito conosciuto, se c'era.
+                        riga = {**(salvate.get(numero) or {"numero": numero}), "errore": str(exc)[:300],
+                                "aggiornato_il": utcnow()}
+                    self.db.salva_spedizione_esterna(riga)
+                    salvate[numero] = riga
+                    avanzamento(fatte, len(da_chiedere))
+        fuori = {}
+        for numero, riga in salvate.items():
+            if not riga or not riga.get("category"):
+                continue
+            categoria = riga["category"]
+            cod = riga.get("is_cod")
+            fuori[numero] = {
+                "tracking_number": numero, "order_name": "", "customer_name": "", "category": categoria,
+                "gls_status": riga.get("gls_status") or "", "gls_event_at": riga.get("gls_event_at"),
+                "closed": bool(riga.get("closed")), "is_cod": None if cod is None else bool(cod),
+                "order_cancelled_at": "", "workflow_status": "",
+                "giacenze": int(riga.get("giacenze") or 0), "passaggi": int(riga.get("giacenze") or 0),
+                "giacenza_aperta": 1 if categoria == "STORAGE" else 0, "negozio": ALTRO_NEGOZIO,
+            }
+        return fuori
+
+    def _riga_esterna(self, numero: str, tracked: dict[str, Any], importo: Any) -> dict[str, Any]:
+        eventi = tracked.get("events") or []
+        # Il contrassegno lo dichiara solo il servizio XML; dalla pagina
+        # pubblica non si sa.
+        is_cod = None
+        if tracked.get("tracking_source") == "GLS XML":
+            is_cod = bool(importo(tracked.get("cod_amount")) or 0)
+        current = self._evento_conclusivo(eventi, bool(is_cod)) or tracked.get("current_event") or {}
+        nota = (current.get("note") or "").strip() if current else (tracked.get("note") or "")
+        classe = self.classifier.classify(
+            code=current.get("code") or tracked.get("code"), state=current.get("state") or tracked.get("status"),
+            note=nota, event_at=current.get("event_at"), is_cod=bool(is_cod),
+        )
+        # Quante volte e' finita ferma in sede: ogni ingresso in giacenza conta uno.
+        giacenze, ferma = 0, False
+        for evento in eventi:
+            in_giacenza = self.classifier.classify(
+                code=evento.get("code"), state=evento.get("state"), note=evento.get("note"),
+                event_at=evento.get("event_at"), is_cod=bool(is_cod),
+            ).category == "STORAGE"
+            if in_giacenza and not ferma:
+                giacenze += 1
+            ferma = in_giacenza
+        return {
+            "numero": numero, "category": classe.category,
+            "gls_status": current.get("state") or tracked.get("status") or "", "gls_note": nota,
+            "gls_event_at": current.get("event_at"), "giacenze": giacenze, "is_cod": is_cod,
+            "closed": classe.category in CATEGORIE_TERMINALI, "errore": "", "aggiornato_il": utcnow(),
+        }
+
     def _evento_conclusivo(self, eventi: list[dict[str, Any]], is_cod: bool) -> dict[str, Any] | None:
         """L'ultimo evento che dichiara un esito, se c'e' stato.
 

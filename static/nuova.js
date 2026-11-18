@@ -1584,6 +1584,7 @@ function rigaContabile(a) {
   ];
   if (conta('giacenza')) pezzi.push(`${numeroIt(conta('giacenza'))} in giacenza`);
   if (conta('sconosciuta')) pezzi.push(`${numeroIt(conta('sconosciuta'))} non trovate`);
+  (r.negozi || []).forEach(n => pezzi.push(`${esc(n.nome)} ${euro(n.costo)}`));
   pezzi.push(r.controlli ? `<b class="da-controllare">${numeroIt(r.controlli)} da controllare</b>` : 'niente da controllare');
   return `<div class="riga-contabile riquadro" data-apri-analisi="${a.id}" data-nome="${esc(nomeMese(a.mese))}" tabindex="0" role="button">
     <div class="riga-contabile-testa">
@@ -1737,6 +1738,7 @@ function disegnaAnalisiContabile() {
     && (!f.testo || x.valori.concat([x.ordine, x.tracking]).some(v => String(v || '').toLowerCase().includes(f.testo.toLowerCase()))));
   const colonne = [
     { chiave: 'esito', nome: 'Esito', valore: (x) => d.esiti[x.esito].nome },
+    { chiave: 'negozio', nome: 'Negozio', valore: (x) => x.negozio },
     ...d.intestazioni.map((h, i) => ({ chiave: `c${i}`, nome: h, valore: (x) => x.valori[i], numero: d.importi.includes(i) })),
     { chiave: 'ordine', nome: 'Ordine', valore: (x) => x.ordine },
     { chiave: 'stato', nome: 'Stato GLS', valore: (x) => x.stato_gls },
@@ -1759,9 +1761,10 @@ function disegnaAnalisiContabile() {
       <h1>${esc(String(d.nome_mese || '').toUpperCase())}</h1>
     </div>
     <section class="riquadro esiti" aria-label="Riepilogo del file">
-      <div class="tra"><div class="in-linea"><span class="grande">${numeroIt(r.spedizioni)}</span><span class="meta">spedizioni · ${numeroIt(r.trovate)} riconosciute dal monitor · ${esc(d.nome_file)}</span></div>
+      <div class="tra"><div class="in-linea"><span class="grande">${numeroIt(r.spedizioni)}</span><span class="meta">spedizioni · ${numeroIt(r.trovate)} tracciate · ${esc(d.nome_file)}</span></div>
         <div class="in-linea"><span class="meta">Totale costi</span><span class="grande">${euro(r.costo_totale)}</span></div></div>
       <div class="barra-esiti">${r.esiti.map(e => `<span style="flex:${e.righe};background:${colore(e.chiave)}" title="${esc(e.nome)}"></span>`).join('')}</div>
+      ${(r.negozi || []).length ? `<div class="negozi-file">${r.negozi.map(n => `<span><strong>${esc(n.nome)}</strong> ${plurale(n.spedizioni, 'spedizione', 'spedizioni')} · ${euro(n.costo)}</span>`).join('')}</div>` : ''}
       <div class="schede-esiti">${r.esiti.map(e => `<button type="button" class="scheda-esito ${f.esito === e.chiave ? 'scelta-esito' : ''}" data-esito="${e.chiave}">
           <i style="background:${colore(e.chiave)}"></i><span class="voce">${esc(e.nome)}</span><b>${numeroIt(e.righe)}</b><span class="meta">${euro(e.costo)}</span></button>`).join('')}</div>
       ${r.controlli.length ? `<div class="controlli-file"><strong>Da controllare</strong>${r.controlli.map(x => `<span>${ic('allarme')}${esc(x.nome)}: <b>${numeroIt(x.righe)}</b></span>`).join('')}</div>`
@@ -1779,6 +1782,7 @@ function disegnaAnalisiContabile() {
         <thead><tr>${colonne.map(c => `<th><button type="button" class="ordina-colonna ${a.ordine?.chiave === c.chiave ? 'attiva' : ''}" data-ordina="${c.chiave}">${esc(c.nome)}${freccia(c.chiave)}</button></th>`).join('')}</tr></thead>
         <tbody>${mostrate.map(x => `<tr style="background:${colore(x.esito)}" ${x.tracking ? `data-tracking="${esc(x.tracking)}" tabindex="0"` : ''}>
           <td><strong>${esc(d.esiti[x.esito].nome)}</strong>${x.dettaglio && x.dettaglio !== d.esiti[x.esito].nome ? `<div class="piccolo">${esc(x.dettaglio)}</div>` : ''}</td>
+          <td>${esc(x.negozio || '')}</td>
           ${x.valori.map((v, j) => `<td class="${d.importi.includes(j) ? 'numero-cella' : ''}">${esc(v)}</td>`).join('')}
           <td>${esc(x.ordine)}</td><td class="stato-cella" title="${esc(x.stato_gls)}">${esc(x.stato_gls)}</td>
           <td class="controlli-cella">${x.controlli.map(esc).join('<br>')}</td></tr>`).join('')}</tbody>
